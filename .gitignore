@@ -1,0 +1,20 @@
+# Unity generated
+/Library/
+/Temp/
+/Logs/
+/obj/
+/UserSettings/
+/MemoryCaptures/
+*.csproj
+*.sln
+*.suo
+*.user
+*.pidb
+*.booproj
+*.unityproj
+# Builds (packaged zips are distributed separately)
+/Build/
+# Raw FPSSample source assets: 1.6 GB, several files over GitHub's 100 MB limit,
+# and not needed by the cartoon / food version (Unity Companion License, not for redistribution)
+/Assets/FPSRaw/
+/Assets/FPSRaw.meta
