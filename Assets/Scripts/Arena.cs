@@ -186,6 +186,7 @@ namespace NeonSiege
             if (!collider) Kill(o.GetComponent<Collider>());
             if (block && collider && size.y > 1.1f) AddBlock(p, size, rotY);
             o.transform.SetParent(transform, true);
+            if (ToonAssets.Available && name == "人行道" && mat == pavement) CandyCurbs(p, size);
             return o;
         }
 
@@ -257,10 +258,11 @@ namespace NeonSiege
         GameObject PH(string name, Vector3 p, float rotY, Vector3 size, bool solid = true, bool shadows = true)
         {
             GameObject o;
+            string toonPathUsed = null;
             if (ToonAssets.Available && ToonProps.TryGetValue(name, out var toonPath))
             {
                 if (toonPath == null) return null;
-                o = Model(toonPath);
+                o = Model(toonPath); toonPathUsed = toonPath;
             }
             else o = Model("PH/" + name + "/" + name);
             if (o == null) return null;
@@ -285,6 +287,7 @@ namespace NeonSiege
             holder.transform.position = p; holder.transform.rotation = Quaternion.Euler(0, rotY, 0);
             if (solid && b.size.y > 1.1f) AddBlock(p, b.size, rotY);
             holder.transform.SetParent(transform, true);
+            if (ToonAssets.Available && solid && toonPathUsed != null && toonPathUsed.StartsWith("Toon/Food/")) holder.AddComponent<FoodJiggle>();
             return holder;
         }
 
@@ -325,6 +328,7 @@ namespace NeonSiege
                     o.transform.SetParent(root.transform, false); o.transform.localPosition += new Vector3(off, 0, 0);
                 }
                 var bc = root.AddComponent<BoxCollider>(); bc.center = new Vector3(off, 1f, 0); bc.size = new Vector3(len, 2f, 2.44f);
+                root.AddComponent<FoodJiggle>();
                 if (i == 0) AddBlock(root.transform.position, new Vector3(6.06f, 2f, 2.44f), rotY);
                 var rt = root.transform; int level = i; float lo = off, ll = len;
                 afterNav.Add(() => ClimbLinks(rt, level, lo, ll));
@@ -363,6 +367,7 @@ namespace NeonSiege
             root.transform.position = p; root.transform.rotation = Quaternion.Euler(0, rotY, 0);
             o.transform.SetParent(root.transform, false); o.transform.localPosition = Vector3.zero; o.transform.localRotation = Quaternion.identity; o.transform.localScale = Vector3.one * scale;
             var cylMesh = ColliderCylinder();
+            root.AddComponent<FoodJiggle>();
             float y = 0;
             foreach (var t in tiers)
             {
@@ -475,6 +480,50 @@ namespace NeonSiege
         {
             Box(name, new Vector3((x0 + x1) / 2, h / 2, (z0 + z1) / 2), new Vector3(x1 - x0, h, z1 - z0), skin);
             Box(name + " 楼顶", new Vector3((x0 + x1) / 2, h + .3f, (z0 + z1) / 2), new Vector3(x1 - x0 + .4f, .6f, z1 - z0 + .4f), concrete, false, 0, false);
+            if (ToonAssets.Available) FrostingEdges(x0, x1, z0, z1, h + .5f);
+        }
+
+        // V19：楼顶一圈奶油滴边（白 / 粉 / 巧克力轮换）
+        int frostingIndex;
+        void FrostingEdges(float x0, float x1, float z0, float z1, float y)
+        {
+            string variant = "Toon/Kitchen/FrostingEdge_" + "WPC"[frostingIndex++ % 3];
+            var pf = Resources.Load<GameObject>(variant); if (pf == null) return;
+            void Edge(Vector3 a, Vector3 b, float yaw)
+            {
+                float len = Vector3.Distance(a, b); int n = Mathf.Max(1, Mathf.RoundToInt(len / 4f)); float seg = len / n;
+                for (int i = 0; i < n; i++)
+                {
+                    var o = Instantiate(pf); o.name = "奶油滴边";
+                    o.transform.position = Vector3.Lerp(a, b, (i + .5f) / n); o.transform.rotation = Quaternion.Euler(0, yaw, 0);
+                    o.transform.localScale = new Vector3(seg / 4f, 1f, 1f);
+                    foreach (var r in o.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    o.transform.SetParent(transform, true);
+                }
+            }
+            const float off = .32f;
+            Edge(new Vector3(x0, y, z1 + off), new Vector3(x1, y, z1 + off), 0);
+            Edge(new Vector3(x0, y, z0 - off), new Vector3(x1, y, z0 - off), 180);
+            Edge(new Vector3(x1 + off, y, z0), new Vector3(x1 + off, y, z1), 90);
+            Edge(new Vector3(x0 - off, y, z0), new Vector3(x0 - off, y, z1), -90);
+        }
+
+        // V19：人行道两边的糖果条纹路沿
+        static Material curbMat;
+        void CandyCurbs(Vector3 p, Vector3 size)
+        {
+            if (curbMat == null)
+            {
+                const int N = 64; var px = new Color[N * N];
+                for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) px[y * N + x] = ((x + y) / 16) % 2 == 0 ? new Color(.95f, .2f, .3f) : Color.white;
+                var t = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Repeat }; t.SetPixels(px); t.Apply();
+                curbMat = new Material(Shader.Find("Standard")) { mainTexture = t }; curbMat.SetFloat("_Glossiness", .55f);
+            }
+            for (int side = -1; side <= 1; side += 2)
+            {
+                var c = Box("糖果路沿", new Vector3(p.x, .1f, p.z + side * (size.z / 2 - .12f)), new Vector3(size.x, .2f, .24f), curbMat, false);
+                var mpb = new MaterialPropertyBlock(); mpb.SetVector("_MainTex_ST", new Vector4(size.x / .8f, 1, 0, 0)); c.GetComponent<Renderer>().SetPropertyBlock(mpb);
+            }
         }
 
         // Photoscanned facade kit placed on a block face; the kit's street side is its +Z face.
@@ -705,6 +754,33 @@ namespace NeonSiege
                 var cc = new GameObject("瓶子碰撞"); cc.transform.SetParent(mg.transform, false); cc.transform.localPosition = new Vector3(0, .85f, 0); cc.transform.localScale = new Vector3(.6f, .85f, .6f);
                 var mc2 = cc.AddComponent<MeshCollider>(); mc2.sharedMesh = ColliderCylinder(); mc2.convex = true;
                 mg.AddComponent<MentosPile>();
+            }
+            // V19：天上的棉花糖云
+            for (int i = 0; i < 12; i++)
+            {
+                var cl = Model("Toon/Kitchen/Cloud_" + (1 + i % 3)); if (cl == null) break;
+                foreach (var c in cl.GetComponentsInChildren<Collider>()) Kill(c);
+                foreach (var r in cl.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                float k = 1.4f + (i % 4) * .35f; cl.transform.localScale = Vector3.one * k;
+                cl.transform.position = new Vector3(-130 + i * 23f, 42 + (i % 3) * 7f, (i % 2 == 0 ? 1 : -1) * (25 + (i * 17) % 60));
+                cl.transform.rotation = Quaternion.Euler(0, i * 37, 0);
+                cl.AddComponent<CloudDrift>().speed = .8f + (i % 3) * .4f;
+            }
+            // V19：外圈人行道的糖果树（贴墙，不挡路）
+            foreach (float tx in new[] { -63f, -45f, -38f, -14f, 6f, 30f, 44f, 60f })
+                foreach (float tz in new[] { 49.4f, -49.4f })
+                {
+                    var tr = Model("Toon/Kitchen/CandyTree"); if (tr == null) break;
+                    foreach (var c in tr.GetComponentsInChildren<Collider>()) Kill(c);
+                    Fit(tr, new Vector3(0, 4.2f, 0)); var hold = new GameObject("糖果树"); tr.transform.SetParent(hold.transform, false);
+                    hold.transform.position = new Vector3(tx, .12f, tz); hold.transform.rotation = Quaternion.Euler(0, tz > 0 ? 180 : 0, 0); hold.transform.SetParent(transform, true);
+                }
+            // V19：路边一堆堆彩色糖粒
+            foreach (var sp in new[] { new Vector3(-48, .02f, 8.4f), new Vector3(-8, .02f, -8.4f), new Vector3(-56, .02f, 31.4f), new Vector3(-30, .02f, -31.4f), new Vector3(10, .02f, 31.4f), new Vector3(30, .02f, -6f), new Vector3(46, .02f, 6f), new Vector3(-8, .02f, 48.6f), new Vector3(-40, .02f, -48.6f), new Vector3(20, .02f, 48.6f) })
+            {
+                var pile = Model("Toon/Kitchen/SprinklePile"); if (pile == null) break;
+                foreach (var c in pile.GetComponentsInChildren<Collider>()) Kill(c);
+                Fit(pile, new Vector3(1.4f, 0, 0)); pile.transform.position += sp; pile.transform.rotation = Quaternion.Euler(0, sp.x * 13, 0); pile.transform.SetParent(transform, true);
             }
             // 出生区顶棚招牌
             Food("Donut", new Vector3(-64, 4.45f, 0), 90, 3.2f);

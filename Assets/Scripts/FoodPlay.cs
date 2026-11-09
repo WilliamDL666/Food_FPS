@@ -343,10 +343,6 @@ namespace NeonSiege
             if (m != null) { foreach (var c in m.GetComponentsInChildren<Collider>()) Destroy(c); Arena.Fit(m, new Vector3(0, .42f, 0)); m.transform.SetParent(holder, false); }
             var sp = holder.gameObject.AddComponent<Spin>(); sp.speed = new Vector3(0, 90, 0); sp.bob = .08f;
             var l = new GameObject("光").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up * .8f; l.color = Ingredients.Col(id); l.range = 2.5f; l.intensity = 1.5f;
-            var t = new GameObject("名字").AddComponent<TextMesh>(); t.transform.SetParent(go.transform, false); t.transform.localPosition = Vector3.up * 1.15f;
-            var font = Resources.Load<Font>("NotoSansSC"); t.font = font; if (font != null) t.GetComponent<MeshRenderer>().sharedMaterial = Arena.WorldText(font);
-            t.text = Ingredients.Name(id); t.anchor = TextAnchor.MiddleCenter; t.fontSize = 48; t.characterSize = .03f; t.color = Ingredients.Col(id);
-            t.gameObject.AddComponent<Billboard>();
             Live.Add(p); return p;
         }
         void OnDestroy() { Live.Remove(this); }
@@ -400,10 +396,6 @@ namespace NeonSiege
             string model = k == Kind.HotpotHeal ? "HotpotStation" : k == Kind.MilkTea ? "MilkTeaMachine" : k == Kind.Oven ? "Oven" : "Freezer";
             var m = Arena.Model("Toon/Kitchen/" + model);
             if (m != null) { foreach (var c in m.GetComponentsInChildren<Collider>()) Arena.Kill(c); Arena.Fit(m, new Vector3(0, k == Kind.HotpotHeal ? 1.15f : k == Kind.Freezer ? 1.45f : 1.25f, 0)); m.transform.SetParent(transform, false); }
-            var t = new GameObject("名字").AddComponent<TextMesh>(); t.transform.SetParent(transform, false); t.transform.localPosition = Vector3.up * 2.1f;
-            var font = Resources.Load<Font>("NotoSansSC"); t.font = font; if (font != null) t.GetComponent<MeshRenderer>().sharedMaterial = Arena.WorldText(font);
-            t.text = k == Kind.HotpotHeal ? "火锅回血炉" : k == Kind.MilkTea ? "奶茶机 · 补弹药" : k == Kind.Oven ? "烤箱 · 金黄酥脆" : "冰柜 · 冰护甲";
-            t.anchor = TextAnchor.MiddleCenter; t.fontSize = 48; t.characterSize = .035f; t.color = new Color(1f, .9f, .7f); t.gameObject.AddComponent<Billboard>();
             if (k == Kind.HotpotHeal)
             {
                 var clip = Resources.Load<AudioClip>("Music/hotpot_bubble");
@@ -903,13 +895,13 @@ namespace NeonSiege
         void CollectionPanel(float W, float H)
         {
             Fill(new Rect(0, 0, W, H), new Color(.1f, .04f, .1f, .92f));
-            Txt(new Rect(0, 40, W, 50), "帽子与菜谱图鉴", new GUIStyle(center) { fontSize = 34, fontStyle = FontStyle.Bold }, new Color(1f, .8f, .9f));
+            Txt(new Rect(0, 34, W, 56), "帽子与菜谱图鉴", new GUIStyle(center) { fontSize = 34, fontStyle = FontStyle.Bold }, new Color(1f, .8f, .9f));
             Txt(new Rect(0, 90, W, 26), "累计击杀 " + Collection.Kills + "   ·   累计变身 " + Collection.Transforms + "   ·   胜场 " + Collection.Wins, new GUIStyle(center) { fontSize = 15 }, new Color(.9f, .85f, .9f));
             float x0 = W / 2 - 560, y0 = 140;
-            Txt(new Rect(x0, y0, 400, 28), "英雄帽子（跟随英雄）", big, Color.white);
+            Txt(new Rect(x0, y0 - 6, 560, 42), "英雄帽子（跟随英雄）", big, Color.white);
             string[] heroes = { "猎隼 · 汉堡", "铆钉 · 饭团", "铁幕 · 布丁", "夜鸦 · 寿司", "焚芯 · 纸杯蛋糕", "幻频 · 甜甜圈" };
             for (int i = 0; i < 6; i++) Txt(new Rect(x0 + (i % 3) * 190, y0 + 40 + (i / 3) * 30, 190, 28), heroes[i], label, new Color(1f, .9f, .75f));
-            Txt(new Rect(x0, y0 + 120, 500, 28), "特别帽子（解锁后只给你自己戴）", big, Color.white);
+            Txt(new Rect(x0, y0 + 112, 560, 42), "特别帽子（解锁后只给你自己戴）", big, Color.white);
             for (int i = 0; i < 3; i++)
             {
                 string h = Collection.SpecialHats[i]; bool un = Collection.HatUnlocked(h), on = Collection.EquippedHat == h;
@@ -919,14 +911,14 @@ namespace NeonSiege
                 Txt(new Rect(b.x, b.y + 36, b.width, 24), un ? "点击佩戴 / 取下" : "未解锁：" + Collection.HatCondition(h), new GUIStyle(center) { fontSize = 12 }, new Color(.85f, .8f, .85f));
                 if (un && GUI.Button(b, GUIContent.none, GUIStyle.none)) Collection.EquippedHat = on ? "" : h;
             }
-            Txt(new Rect(x0 + 620, y0, 500, 28), "菜谱图鉴（凑成过的菜会点亮）", big, Color.white);
+            Txt(new Rect(x0 + 620, y0 - 6, 560, 42), "菜谱图鉴（凑成过的菜会点亮）", big, Color.white);
             for (int i = 0; i < Ingredients.Forms.Length; i++)
             {
                 var fm = Ingredients.Forms[i]; bool d = Collection.Discovered(fm);
                 Rect r = new Rect(x0 + 620, y0 + 40 + i * 62, 520, 56);
                 Fill(r, d ? new Color(.3f, .12f, .25f, .9f) : new Color(.18f, .18f, .2f, .9f));
                 Fill(new Rect(r.x, r.y, 6, r.height), d ? Ingredients.FormColor(fm) : new Color(.4f, .4f, .45f));
-                Txt(new Rect(r.x + 14, r.y + 4, 500, 24), (d ? Ingredients.FormName(fm) : "？？？") + "  ·  " + Ingredients.FormRecipe(fm), label, d ? Ingredients.FormColor(fm) : new Color(.7f, .7f, .75f));
+                Txt(new Rect(r.x + 14, r.y + 2, 500, 28), (d ? Ingredients.FormName(fm) : "？？？") + "  ·  " + Ingredients.FormRecipe(fm), label, d ? Ingredients.FormColor(fm) : new Color(.7f, .7f, .75f));
                 Txt(new Rect(r.x + 14, r.y + 28, 500, 22), d ? Ingredients.FormEffect(fm) : "还没做出来过", small, new Color(.85f, .85f, .9f));
             }
             Rect close = new Rect(W / 2 - 120, H - 90, 240, 50);

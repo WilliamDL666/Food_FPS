@@ -136,12 +136,51 @@ ITEMS = {'Milk': milk, 'Tea': tea, 'Boba': boba, 'Flour': flour, 'Egg': egg, 'Ch
          'Cheese': cheese, 'Ice': ice, 'Sugar': sugar, 'Rice': rice, 'Nori': nori,
          'MilkTeaMachine': milkteamachine, 'Oven': oven, 'Freezer': freezer, 'HotpotStation': hotpotstation, 'Crate': crate,
          'Turntable': turntable, 'Mentos': mentos, 'Plate': plate}
+
+# ------------------------------------------------------------------ V19：萌化地图用的装饰（会合并成一个网格，减少渲染器数量）
+def frosting(col, key):
+    def build():
+        cyl((0, 0, 0), .22, 4.0, mat(key, col, .3), rot=(0, 90, 0), v=20, bev=.4)               # 沿屋檐的一条奶油
+        rnd = random.Random(hash(key) & 255)
+        for i in range(9):
+            x = -1.8 + i * .45 + rnd.uniform(-.08, .08); L = rnd.uniform(.25, .7)
+            cyl((x, -.12, -L / 2), .09, L, mat(key, col, .3), v=12, bev=.4)
+            sph((x, -.12, -L), (.12, .12, .14), mat(key, col, .3), 12)
+        for i in range(10):
+            sph((rnd.uniform(-1.9, 1.9), rnd.uniform(-.15, .1), .2), (.04, .015, .015), mat('spr%d' % (i % 5), [(1, .35, .5), (.4, .8, 1), (1, .9, .3), (.5, 1, .6), (.8, .5, 1)][i % 5], .25), 8)
+    return build
+def cloud(seed):
+    def build():
+        rnd = random.Random(seed); cols = [(1, .8, .9), (1, 1, 1), (.85, .9, 1)]
+        for i in range(9):
+            sph((rnd.uniform(-4, 4), rnd.uniform(-1.5, 1.5), rnd.uniform(0, 1.6)), (rnd.uniform(1.5, 2.6),) * 3, mat('cloud%d' % (i % 3), cols[(seed + i) % 3], .6), 16)
+    return build
+def candytree():
+    for i in range(8): cyl((0, 0, .2 + i * .4), .12, .42, mat('trunkR' if i % 2 == 0 else 'trunkW', (.95, .2, .3) if i % 2 == 0 else (1, 1, 1), .3), v=16, bev=.2)
+    rnd = random.Random(9)
+    for i in range(7): sph((rnd.uniform(-.6, .6), rnd.uniform(-.6, .6), 3.4 + rnd.uniform(-.3, .5)), (rnd.uniform(.6, .9),) * 3, mat('floss', (1, .62, .82), .6), 16)
+    eyes(0, -.85, 3.4, 4)
+def sprinkle_pile():
+    rnd = random.Random(5)
+    for i in range(14): cyl((rnd.uniform(-.6, .6), rnd.uniform(-.6, .6), .05), .05, .3, mat('spr%d' % (i % 5), [(1, .35, .5), (.4, .8, 1), (1, .9, .3), (.5, 1, .6), (.8, .5, 1)][i % 5], .25), rot=(90, 0, rnd.uniform(0, 180)), v=8)
+ITEMS.update({'FrostingEdge_W': frosting((1, .98, .95), 'creamW'), 'FrostingEdge_P': frosting((1, .62, .78), 'creamP'), 'FrostingEdge_C': frosting((.45, .25, .15), 'creamC'),
+              'Cloud_1': cloud(1), 'Cloud_2': cloud(2), 'Cloud_3': cloud(3), 'CandyTree': candytree, 'SprinklePile': sprinkle_pile})
+MERGE = {'FrostingEdge_W', 'FrostingEdge_P', 'FrostingEdge_C', 'Cloud_1', 'Cloud_2', 'Cloud_3', 'CandyTree', 'SprinklePile'}
+ONLY = set(sys.argv[sys.argv.index('--') + 3:]) if '--' in sys.argv and len(sys.argv) > sys.argv.index('--') + 3 else set()
 HATS_ = {'Takoyaki': takoyaki, 'Xiaolongbao': xiaolongbao, 'Pizza': pizza}
 random.seed(4)
 for name, fn in list(ITEMS.items()) + [('Hat_' + k, v) for k, v in HATS_.items()]:
     bpy.ops.wm.read_factory_settings(use_empty=True); _m.clear()
     ROOT = bpy.data.objects.new(name, None); bpy.context.collection.objects.link(ROOT)
+    if ONLY and name not in ONLY: continue
     fn(); fallguys_style.apply(ROOT, bevel_mul=1.2, s_mul=1.05)
+    if name in MERGE:   # 应用修改器后合并成一个网格
+        meshes = [o for o in bpy.data.objects if o.type == 'MESH']
+        bpy.ops.object.select_all(action='DESELECT')
+        for o in meshes: o.select_set(True)
+        bpy.context.view_layer.objects.active = meshes[0]
+        bpy.ops.object.convert(target='MESH'); bpy.ops.object.join()
+        j = bpy.context.object; j.name = name; j.parent = ROOT
     p = os.path.join(HATS if name.startswith('Hat_') else OUT, name + '.glb')
     bpy.ops.export_scene.gltf(filepath=p, export_format='GLB', export_apply=True, export_yup=True); print('EXPORTED', name, os.path.getsize(p))
 print('KITCHEN_DONE')

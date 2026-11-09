@@ -252,6 +252,17 @@ def pancakes():         # climbable pancake stack: 3 steps of ~0.75 m, radius 2.
         a = j / 6 * 6.283
         sph((math.cos(a) * .7, math.sin(a) * .7, z + .1), (.1, .1, .09), mat('berry', rough=.2))
 
+def kawaii(x, y, z, s=1.0):   # V19：大美食都加上一张可爱的脸（朝 -Y）
+    for dx in (-.11 * s, .11 * s):
+        sph((x + dx, y, z), (.05 * s, .03 * s, .075 * s), mat('eyeK', (.05, .04, .05), .15))
+        sph((x + dx + .015 * s, y - .02 * s, z + .025 * s), (.016 * s, .01 * s, .02 * s), mat('eyeW', (1, 1, 1), .2))
+        sph((x + dx * 1.7, y + .01 * s, z - .09 * s), (.05 * s, .015 * s, .03 * s), mat('blushK', (1, .55, .6), .5))
+    sph((x, y, z - .08 * s), (.035 * s, .015 * s, .02 * s), mat('eyeK', (.05, .04, .05), .15))
+FACES = {'MilkTea': (0, -.74, .75, 1.6), 'HotPot': (0, -1.52, .55, 2.0), 'BigCake': (0, -1.62, .45, 2.2), 'CakeSlice': (0, -.82, .55, 1.3), 'Donut': (0, -.68, 1.0, 1.3),
+         'Burger': (0, -.86, .6, 1.4), 'Sushi': (0, -.47, .3, 1.0), 'Dumpling': (0, -.5, .42, 1.0), 'Macarons': (0, -.52, .52, .9), 'IceCream': (0, -.56, 1.65, 1.2),
+         'Popsicle': (0, -.14, 1.35, .9), 'Skewers': (0, -.42, .35, .8), 'Ramen': (0, -.62, .4, 1.1), 'ChocoBlock': (0, -1.23, 1.0, 2.0), 'SpongeBlock': (0, -1.23, 1.0, 2.0),
+         'WaferBlock': (0, -1.23, 1.0, 2.0), 'JellyBlock': (0, -1.23, 1.0, 2.0), 'Pancakes': (0, -2.42, .4, 2.0)}
+
 PROPS = {'MilkTea': milktea, 'HotPot': hotpot, 'BigCake': bigcake, 'CakeSlice': cakeslice, 'Donut': donut, 'Burger': burger,
          'Sushi': sushi, 'Dumpling': dumpling, 'Macarons': macarons, 'IceCream': icecream, 'Popsicle': popsicle,
          'LollipopLamp': lollipoplamp, 'Skewers': skewers, 'Ramen': ramen, 'CandyFence': candyfence,
@@ -260,6 +271,7 @@ for name, build in PROPS.items():
     bpy.ops.wm.read_factory_settings(use_empty=True); _m.clear()
     ROOT = bpy.data.objects.new('Food_' + name, None); bpy.context.collection.objects.link(ROOT)
     build()
+    if name in FACES: kawaii(*FACES[name])
     fallguys_style.apply(ROOT)
     path = os.path.join(OUT, name + '.glb')
     bpy.ops.export_scene.gltf(filepath=path, export_format='GLB', export_apply=True, export_yup=True)

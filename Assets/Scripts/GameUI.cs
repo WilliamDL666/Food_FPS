@@ -223,6 +223,7 @@ namespace NeonSiege
             Fighter p = game.player;
             if (preview == 1) { MainMenu(W, H); return; }
             if (preview == 2) { Settings(W, H); return; }
+            if (preview == 3) { Help(W, H); return; }
             if (!started && !game.autoplay && !game.testMode)
             {
                 if (overlay == Overlay.Settings) Settings(W, H);
@@ -909,6 +910,7 @@ namespace NeonSiege
             Backdrop(W, H);
             float pw = Mathf.Min(1120, W - 40), ph = Mathf.Min(720, H - 40), x = (W - pw) / 2, y = (H - ph) / 2;
             PanelBox(new Rect(x, y, pw, ph), 18);
+            if (ToonAssets.Available) { FoodHelp(x, y, pw, ph); return; }
             Text(new Rect(x + 34, y + 18, pw, 50), "霓城封锁 · 棱能爆破", title);
             Text(new Rect(x + 36, y + 64, pw, 24), "NEON LOCKDOWN · 3v3 BOMB DEFUSAL", With(tiny, 13, TextAnchor.MiddleLeft), new Color(.5f, .8f, 1f));
             GUI.Label(new Rect(x + 36, y + 96, pw - 72, 70), ToonAssets.Available ? "攻方带着生日蛋糕，在 A 或 B 点按住 G 放下蛋糕并点燃蜡烛（4 秒），40 秒后蛋糕爆炸即获胜。守方阻止放蛋糕，或在爆炸前按住 G 吹灭蜡烛（6 秒）。打倒所有敌人不会直接结束回合。回合内不复活，每回合攻守互换，先赢 5 回合获胜。地图上的零食按 G 吃掉可以回血。" : "攻方携带棱能炸弹，在 A 或 B 点按住 G 安装（4 秒），炸弹 40 秒后引爆即获胜。守方阻止安装，或在引爆前按住 G 拆除（6 秒）。击杀所有敌人不会直接结束回合——攻方必须真正引爆炸弹。回合内不复活，每回合结束攻守互换，先赢 5 回合获胜。", wrap);
@@ -921,6 +923,35 @@ namespace NeonSiege
             for (int i = 0; i < map.Length; i++) Text(new Rect(x + pw * .52f, y + 220 + i * 28, pw * .46f, 26), map[i], With(small, 14, TextAnchor.MiddleLeft));
             Fill(new Rect(x + 34, y + ph - 140, pw - 68, 1), new Color(.25f, .5f, .6f));
             GUI.Label(new Rect(x + 36, y + ph - 130, pw - 72, 46), "生命 100 + 护甲 50（护甲优先扣除）· 子弹有飞行时间，远距离需要提前量 · 夜鸦侦测到的敌人会透墙高亮。", wrap);
+            if (Button(new Rect(x + pw / 2 - 160, y + ph - 74, 320, 52), !started ? "返回主菜单" : returnTo == Overlay.Pause ? "返回" : "继续游戏"))
+            {
+                if (!started) overlay = Overlay.Menu;
+                else if (returnTo == Overlay.Pause) overlay = Overlay.Pause;
+                else Close();
+            }
+        }
+
+        // V19：美食模式的帮助页（每行都很短，不会折行重叠）
+        void FoodHelp(float x, float y, float pw, float ph)
+        {
+            Text(new Rect(x + 34, y + 14, pw, 56), "霓城封锁 · 美食大作战", title);
+            Text(new Rect(x + 36, y + 68, pw, 24), "当前模式：" + Match.ModeName(Match.Mode), With(tiny, 14, TextAnchor.MiddleLeft), new Color(1f, .75f, .9f));
+            string rule = Match.Mode == GameMode.Cook ? "两队把地图上的食材送回自己的大锅：每样 +1 分，凑成一道菜再 +1，也可以去对面锅里偷。先到 20 分获胜，阵亡 4 秒后复活。"
+                : Match.Mode == GameMode.Grow ? "6 人各自为战：吃零食 +1 级，击杀 +2 级，阵亡减半。越大越肉、越慢、越显眼，时间到时最大的人获胜。"
+                : Match.Mode == GameMode.FFA ? "6 人各自为战：阵亡 3 秒后复活并随机拿一把美食枪，阵亡会掉落手里的枪。先到 15 杀获胜。"
+                : "攻方带着生日蛋糕，在 A 或 B 点按住 G 放下蛋糕点蜡烛（4 秒），40 秒后蛋糕爆炸即获胜；守方阻止，或按住 G 吹灭蜡烛（6 秒）。回合内不复活，每回合攻守互换，先赢 5 回合获胜。";
+            GUI.Label(new Rect(x + 36, y + 96, pw - 72, 56), rule, wrap);
+            Fill(new Rect(x + 34, y + 160, pw - 68, 1), new Color(.6f, .35f, .55f));
+            Text(new Rect(x + 36, y + 170, 400, 34), "操作", large);
+            string[] keys = { "WASD 移动 · 鼠标瞄准 · 左键开火", "右键 开镜（显示美食准镜）", "Shift 冲刺 · Ctrl/C 蹲下（冲刺中滑铲）", "Space 跳跃 / 翻上美食方块", "Q / E 左右探头 · R 换弹",
+                "4 汽水罐手雷（按住瞄准）· V 平底锅", "F 技能 · X 大招 · 1/2/3 表情", "G（按住）交互 · B 买枪 · Tab 数据", "M 大地图 · H 帮助 · Esc 暂停" };
+            for (int i = 0; i < keys.Length; i++) Text(new Rect(x + 36, y + 210 + i * 30, pw * .46f, 28), keys[i], With(small, 15, TextAnchor.MiddleLeft));
+            Text(new Rect(x + pw * .5f, y + 170, 400, 34), "地图上的美食", large);
+            string[] map = { "闪光圈 + 头顶「G」气泡 = 可以交互", "零食：按住 G 吃掉，+25 生命", "火锅回血炉：涮一涮回血，热气会暴露你", "奶茶机补弹药 · 烤箱伤害 +15% · 冰柜冰护甲", "食材：走过去捡，两样凑成一道菜就变身",
+                "外卖箱：无人机空投，抢到直接变身", "曼妥思可乐：用汽水手雷炸它会喷泉", "果冻弹床弹你上高处 · 传菜转盘会转", "巧克力酱减速 · 黄油打滑", "蛋糕墙能打穿，奶油能把它补回来" };
+            for (int i = 0; i < map.Length; i++) Text(new Rect(x + pw * .5f, y + 210 + i * 28, pw * .47f, 26), map[i], With(small, 14, TextAnchor.MiddleLeft));
+            Fill(new Rect(x + 34, y + ph - 120, pw - 68, 1), new Color(.6f, .35f, .55f));
+            Text(new Rect(x + 36, y + ph - 112, pw - 72, 26), "生命 100 + 护甲 50 · 子弹有飞行时间 · 主菜单里有帽子与菜谱图鉴", With(small, 14, TextAnchor.MiddleLeft), new Color(.85f, .8f, .9f));
             if (Button(new Rect(x + pw / 2 - 160, y + ph - 74, 320, 52), !started ? "返回主菜单" : returnTo == Overlay.Pause ? "返回" : "继续游戏"))
             {
                 if (!started) overlay = Overlay.Menu;

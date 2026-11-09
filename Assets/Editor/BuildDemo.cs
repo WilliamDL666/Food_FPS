@@ -114,13 +114,59 @@ public static class BuildDemo
         { "ConcreteFloor", new Color(.86f, .84f, .98f) }, { "Corrugated", new Color(1f, .82f, .26f) }, { "MetalPlate", new Color(.74f, .7f, .95f) },
         { "Rusty", new Color(1f, .6f, .35f) }, { "SkylineA", new Color(1f, .78f, .6f) }, { "SkylineB", new Color(.62f, .82f, 1f) },
         { "SkylineC", new Color(.9f, .72f, 1f) }, { "SkylineD", new Color(.66f, .94f, .76f) }, { "Plaster", new Color(1f, .9f, .74f) } };
+    static float CandyScale(string name) { return name == "Asphalt" ? 4f : name == "Pavement" ? 1.6f : name.StartsWith("Skyline") ? 6f : 2.4f; }
+    static readonly Color[] Sprinkle = { new Color(1f, .35f, .5f), new Color(.4f, .8f, 1f), new Color(1f, .9f, .3f), new Color(.5f, 1f, .6f), new Color(.8f, .5f, 1f), Color.white };
+    // 程序生成的可平铺糖果纹理，存成 PNG 放在 Resources/Textures/Candy_*.png
+    static Texture2D CandyTexture(string name, Color b)
+    {
+        const int N = 256; var px = new Color[N * N]; var rnd = new System.Random(name.GetHashCode());
+        for (int i = 0; i < px.Length; i++) px[i] = b;
+        void Dot(float cx, float cy, float r, Color c) { for (int y = (int)(cy - r - 1); y <= cy + r + 1; y++) for (int x = (int)(cx - r - 1); x <= cx + r + 1; x++) { float d = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy)); float a = Mathf.Clamp01(r - d + .5f); if (a <= 0) continue; int xx = ((x % N) + N) % N, yy = ((y % N) + N) % N; px[yy * N + xx] = Color.Lerp(px[yy * N + xx], c, a); } }
+        void Dash(float cx, float cy, float len, float ang, float r, Color c) { for (float t = -len / 2; t <= len / 2; t += .7f) Dot(cx + Mathf.Cos(ang) * t, cy + Mathf.Sin(ang) * t, r, c); }
+        Color lighter = Color.Lerp(b, Color.white, .45f), darker = Color.Lerp(b, Color.black, .12f);
+        switch (name)
+        {
+            case "Brick":   // 草莓奶油墙：白色奶油圆点 + 一层层的分隔线
+                for (int y = 0; y < N; y++) if (y % 64 < 3) for (int x = 0; x < N; x++) px[y * N + x] = darker;
+                for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) Dot(i * 64 + (j % 2) * 32 + 16, j * 64 + 34, 9, lighter);
+                break;
+            case "ConcretePanels": case "MetalPlate":   // 威化格子
+                for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) if (x % 32 < 3 || y % 32 < 3) px[y * N + x] = lighter;
+                break;
+            case "Asphalt":   // 撒满彩色糖粒的路面
+                for (int i = 0; i < 70; i++) Dash((float)rnd.NextDouble() * N, (float)rnd.NextDouble() * N, 9, (float)rnd.NextDouble() * 6.28f, 2.2f, Color.Lerp(Sprinkle[i % 6], b, .25f));
+                break;
+            case "Pavement":   // 饼干砖：圆角方块 + 小孔
+                for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) if (x % 128 < 4 || y % 128 < 4) px[y * N + x] = Color.Lerp(b, Color.white, .6f);
+                for (int j = 0; j < 2; j++) for (int i = 0; i < 2; i++) for (int k = 0; k < 4; k++) Dot(i * 128 + 40 + (k % 2) * 48, j * 128 + 40 + (k / 2) * 48, 4, darker);
+                break;
+            case "Concrete": case "Plaster":   // 香草奶油：小小的香草籽和巧克力碎
+                for (int i = 0; i < 60; i++) Dot((float)rnd.NextDouble() * N, (float)rnd.NextDouble() * N, 1.6f + (float)rnd.NextDouble() * 1.5f, i % 3 == 0 ? new Color(.45f, .28f, .18f) : darker);
+                break;
+            case "Corrugated": case "MetalSheet": case "Rusty":   // 糖果条纹
+                for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) if (((x + y) / 32) % 2 == 0) px[y * N + x] = lighter;
+                break;
+            default:
+                if (name.StartsWith("Skyline")) { for (int j = 0; j < 4; j++) for (int i = 0; i < 4; i++) Dot(i * 64 + 32, j * 64 + 32, 12, Color.Lerp(b, Color.white, .5f)); break; }
+                return null;
+        }
+        var tex = new Texture2D(N, N, TextureFormat.RGBA32, true); tex.SetPixels(px); tex.Apply();
+        string path = "Assets/Resources/Textures/Candy_" + name + ".png";
+        File.WriteAllBytes(path, tex.EncodeToPNG()); Object.DestroyImmediate(tex);
+        AssetDatabase.ImportAsset(path);
+        var imp = (TextureImporter)AssetImporter.GetAtPath(path); if (imp != null) { imp.wrapMode = TextureWrapMode.Repeat; imp.SaveAndReimport(); }
+        return AssetDatabase.LoadAssetAtPath<Texture2D>(path);
+    }
+
     static void Triplanar(string name, string tex, float scale, float gloss, float metal, Color tint, float bump)
     {
         if (ToonPalette.TryGetValue(name, out var toon))
         {
             var tm = Mat(name, Shader.Find("NeonSiege/Triplanar"));
-            tm.SetTexture("_MainTex", null); tm.SetTexture("_BumpMap", null);
-            tm.SetFloat("_Scale", scale); tm.SetFloat("_Glossiness", .32f); tm.SetFloat("_Metallic", 0f); tm.SetFloat("_BumpScale", 0f); tm.SetColor("_Color", toon);
+            tm.SetTexture("_BumpMap", null);
+            var candy = CandyTexture(name, toon);   // V19：糖果图案（奶油圆点、威化格、糖粒、饼干砖、糖果条纹……）
+            tm.SetTexture("_MainTex", candy);
+            tm.SetFloat("_Scale", candy != null ? CandyScale(name) : scale); tm.SetFloat("_Glossiness", .32f); tm.SetFloat("_Metallic", 0f); tm.SetFloat("_BumpScale", 0f); tm.SetColor("_Color", candy != null ? Color.white : toon);
             EditorUtility.SetDirty(tm);
             return;
         }

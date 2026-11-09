@@ -685,7 +685,7 @@ namespace NeonSiege
                 }
                 return false;
             }
-            if (ToonAssets.Available) { FoodReact.OnImpact(this, h, w); FoodFx.Impact(h.point, h.normal, w); return true; }   // V17：墙上地上留下酱汁
+            if (ToonAssets.Available) { var jg = h.collider.GetComponentInParent<FoodJiggle>(); if (jg != null) jg.Hit(); FoodReact.OnImpact(this, h, w); FoodFx.Impact(h.point, h.normal, w); return true; }   // V17：墙上地上留下酱汁
             Fx.Sparks(h.point, h.normal, new Color(1f, .75f, .4f), 7);
             Fx.Burst(h.point, h.normal, new Color(.5f, .5f, .52f, .5f), 4, 1.2f, .12f, .6f, .1f, Fx.Smoke);
             Fx.BulletHole(h.point, h.normal, Random.value < .3f);

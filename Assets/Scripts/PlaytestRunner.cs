@@ -329,8 +329,8 @@ namespace NeonSiege
                     yield return new WaitForSeconds(.3f);
                     bool blocked = vic.hp >= 100 && vic.armor >= 50;
                     vic.meleeUntil = 0;
-                    Bullet.Fire(sh, sh.Eye, sh.Eye, (vic.Chest - sh.Eye).normalized, Color.white);
-                    yield return new WaitForSeconds(.3f);
+                    for (int k = 0; k < 4; k++) { Bullet.Fire(sh, sh.Eye, sh.Eye, (vic.Chest - sh.Eye).normalized, Color.white); yield return new WaitForSeconds(.15f); }   // 幻频被动有 15% 概率挡掉一发
+                    yield return new WaitForSeconds(.2f);
                     bool hurt = vic.hp + vic.armor < 150;
                     vic.hp = 100; vic.armor = 50;
                     Check("M12", "美食枪：7 把枪和食物子弹都能加载，奶茶液面/糖葫芦/寿司转盘可动，打墙留酱汁，平底锅挡正面子弹",
@@ -457,6 +457,13 @@ namespace NeonSiege
                         v18refill && v18crispy && v18iceArmor && v18opened && (v18raven == null || v18ultOk) && v18spun,
                         "奶茶机=" + v18refill + " 烤箱=" + v18crispy + " 冰柜=" + v18iceArmor + "，外卖=" + v18opened + "，大招=" + (v18raven == null ? "（本局没有夜鸦）" : v18ultOk.ToString()) + "，转盘=" + v18spun);
                     foreach (var e in m.fighters) { e.revealedUntil = 0; e.Food.EndForm(false); e.Food.ingredients.Clear(); }
+                    // ---------------- V19：交互标记 / 果冻抖动 / 萌化装饰
+                    yield return null;
+                    int jiggles = FindObjectsOfType<FoodJiggle>().Length, frost = 0, clouds = FindObjectsOfType<CloudDrift>().Length;
+                    foreach (Transform t in m.arena.transform) if (t.name == "奶油滴边") frost++;
+                    bool snackMarked = InteractMarkers.Count >= 7;
+                    Check("M18", "能交互的东西有闪光圈和 G 气泡（装饰美食没有）；美食道具被打会抖；楼顶奶油滴边、棉花糖云", snackMarked && jiggles > 10 && frost > 50 && clouds >= 10,
+                        "交互标记 " + InteractMarkers.Count + " 个，会抖的美食 " + jiggles + " 个，奶油滴边 " + frost + " 段，云 " + clouds + " 朵");
                 }
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
@@ -774,6 +781,8 @@ namespace NeonSiege
             m.ui.preview = 1; for (int f = 0; f < 3; f++) yield return null;
             yield return Grab(System.IO.Path.Combine(dir, "17_main_menu.png"));
             m.ui.preview = 2; yield return Grab(System.IO.Path.Combine(dir, "18_settings.png"));
+            m.ui.preview = 3; yield return Grab(System.IO.Path.Combine(dir, "24_help.png"));
+            if (ToonAssets.Available) { m.ui.preview = 1; FoodHud.showCollection = true; yield return null; yield return Grab(System.IO.Path.Combine(dir, "25_collection.png")); FoodHud.showCollection = false; }
             m.ui.preview = 0; if (p != null) p.SetViewModelVisible(true);
             m.ui.PreviewPause(true); yield return Grab(System.IO.Path.Combine(dir, "19_pause.png")); m.ui.PreviewPause(false);
             Debug.Log("NEON_SHOTS_DONE " + dir);

@@ -96,7 +96,7 @@ namespace NeonSiege
             if (Arg("-neonTests")) gameObject.AddComponent<PlaytestRunner>().mode = "tests";
             else if (Arg("-neonMatchTest") || Arg("-neonFFATest") || Arg("-neonCookTest") || Arg("-neonGrowTest")) gameObject.AddComponent<PlaytestRunner>().mode = "match";
             else if (Arg("-neonShots")) gameObject.AddComponent<PlaytestRunner>().mode = "shots";
-            if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); }
+            if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); gameObject.AddComponent<InteractMarkers>(); }
             StartMatch();
         }
 
