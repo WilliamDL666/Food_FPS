@@ -6,15 +6,22 @@ namespace NeonSiege
     // factory hall and the alleys. The wind and siren clips are synthesised at startup (no assets).
     public class Ambience : MonoBehaviour
     {
-        AudioSource wind;
+        AudioSource wind, music; bool food;
         float nextGunfire, nextSiren;
         AudioClip siren;
         static readonly string[] guns = { "gun_ar", "gun_lmg", "gun_smg", "gun_br", "gun_dmr" };
 
         void Start()
         {
+            if (ToonAssets.Available)
+            {
+                // V18：美食街背景音乐（程序合成），不再有远处枪声和警报
+                var clip = Resources.Load<AudioClip>("Music/food_street");
+                if (clip != null) { music = gameObject.AddComponent<AudioSource>(); music.clip = clip; music.loop = true; music.spatialBlend = 0; music.volume = .2f; music.Play(); }
+                food = true;
+            }
             wind = gameObject.AddComponent<AudioSource>();
-            wind.clip = MakeWind(14f); wind.loop = true; wind.spatialBlend = 0; wind.volume = .16f; wind.Play();
+            wind.clip = MakeWind(14f); wind.loop = true; wind.spatialBlend = 0; wind.volume = food ? .04f : .16f; wind.Play();
             siren = MakeSiren(7f);
             nextGunfire = Time.time + Random.Range(6f, 12f);
             nextSiren = Time.time + Random.Range(25f, 45f);
@@ -35,7 +42,7 @@ namespace NeonSiege
 
         void Update()
         {
-            if (Match.I == null) return;
+            if (Match.I == null || food) return;
             if (Time.time >= nextGunfire)
             {
                 // a short exchange somewhere outside the lockdown zone

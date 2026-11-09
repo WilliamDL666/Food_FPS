@@ -382,6 +382,82 @@ namespace NeonSiege
                     Check("M14", "蛋糕爆破文案（点蜡烛 / 吹蜡烛 / 小费），6 个角色都是糖豆人式豆子并戴着美食帽子", words && beans == m.fighters.Count && hats == m.fighters.Count,
                         "文案=" + words + "，豆子角色 " + beans + "/" + m.fighters.Count + "，美食帽子 " + hats + "/" + m.fighters.Count);
                 }
+                if (ToonAssets.Available)
+                {
+                    // ---------------- V18 A：敌我颜色 / 阵亡消失 / 火锅回血炉
+                    Color BodyColor(Fighter f)
+                    {
+                        foreach (var r in f.GetComponentsInChildren<Renderer>(true))
+                            if (r.name == "Body") foreach (var mt in r.materials) if (mt.name.StartsWith("Character_Main") && mt.HasProperty("baseColorFactor")) return mt.GetColor("baseColorFactor");
+                        return Color.black;
+                    }
+                    Color v18c0 = BodyColor(Other(att, 0)), v18c1 = BodyColor(Other(def, 0));
+                    bool v18colorsDiffer = Mathf.Abs(v18c0.r - v18c1.r) + Mathf.Abs(v18c0.b - v18c1.b) > .6f;
+                    var v18corpse = Other(def, 1); Place(v18corpse, new Vector3(-30, .05f, -2), 0); yield return null;
+                    v18corpse.ReceiveDamage(999, Other(att, 0), v18corpse.transform.position, false);
+                    for (float w = 0; w < 1.3f; w += Time.deltaTime) yield return null;
+                    bool v18hidden = true; foreach (var r in v18corpse.GetComponentsInChildren<Renderer>()) if (r.enabled && r.name != "Shine") v18hidden = false;
+                    bool v18plate = GameObject.Find("Plate(Clone)") != null;
+                    v18corpse.Respawn(new Vector3(-30, .05f, -2), 0); yield return null;
+                    bool v18back = false; foreach (var r in v18corpse.GetComponentsInChildren<Renderer>()) if (r.enabled && r.name == "Body") v18back = true;
+                    KitchenStation v18pot = null; foreach (var it in Interactable.All) if (it is KitchenStation ks && ks.kind == KitchenStation.Kind.HotpotHeal) { v18pot = ks; break; }
+                    var v18diner = Other(att, 2); v18diner.hp = 40; float v18hp0 = v18diner.hp;
+                    if (v18pot != null) { Place(v18diner, v18pot.transform.position + Vector3.right * 1.2f, -90); yield return null; for (float w = 0; w < 1.5f; w += Time.deltaTime) { v18pot.Hold(v18diner, Time.deltaTime); yield return null; } }
+                    bool v18potHeal = v18diner.hp >= v18hp0 + 10f && v18diner.Revealed; v18diner.hp = 100;
+                    Check("M15", "敌我颜色不同、阵亡后消失并留下盘子、复活后恢复、火锅回血炉回血并暴露位置", v18colorsDiffer && v18hidden && v18plate && v18back && v18potHeal,
+                        "蓝 " + v18c0 + " 红 " + v18c1 + "，消失=" + v18hidden + " 盘子=" + v18plate + " 复活显示=" + v18back + "，火锅回血 " + v18hp0.ToString("0") + "→" + (v18hp0 + (v18potHeal ? 10 : 0)) + "+ 暴露=" + v18potHeal);
+
+                    // ---------------- V18 B：食材变身 / 黑暗料理 / 食物反应 / 奶油补墙
+                    var v18chef = Other(att, 1); Place(v18chef, new Vector3(-40, .05f, 2), 90); v18chef.armor = 50;
+                    v18chef.Food.Pick("Flour"); v18chef.Food.Pick("Egg");
+                    bool v18cake = v18chef.Food.Transformed && v18chef.Food.form == FoodForm.Cake && v18chef.armor > Config.MaxArmor;
+                    v18chef.Food.EndForm(false); v18chef.Food.Pick("Chili"); v18chef.Food.Pick("Sugar");
+                    bool v18dark = v18chef.Food.form == FoodForm.Dark;
+                    v18chef.Food.EndForm(false); v18chef.Food.Pick("Milk"); v18chef.Food.Pick("Boba");
+                    int v18ammo0 = v18chef.ammo; bool v18milk = v18chef.Food.InfiniteAmmo; v18chef.Food.EndForm(false); v18chef.armor = 50;
+                    bool v18recipes = Ingredients.Recipe("Rice", "Nori") == FoodForm.Onigiri && Ingredients.Recipe("Cheese", "Bread") == FoodForm.Burger && Ingredients.Recipe("Sugar", "Ice") == FoodForm.IceCream && Ingredients.Recipe("HotpotBase", "Chili") == FoodForm.Spicy;
+                    SauceZone.Mark(new Vector3(-40, 0, 4), 3f, true); bool v18hotChoco = SauceZone.HotAt(new Vector3(-40, .05f, 4));
+                    SauceZone.Mark(new Vector3(-14, 0, -4.5f), 3f, false); bool v18slick = SauceZone.SlickAt(new Vector3(-14, .05f, -4.5f));
+                    SteamCloud.Suppress(2f); bool v18cooled = Skills.LineClear(new Vector3(8, 2.2f, -40.5f), new Vector3(8, 2.2f, -30.5f), null);
+                    bool v18repaired = false;
+                    if (m.arena.breakWalls.Count > 0)
+                    {
+                        var v18wall = m.arena.breakWalls[0]; var v18p0 = v18wall.pieces[0]; var v18p1 = v18wall.pieces[1];
+                        v18p1.Break(null); v18wall.RepairNear(v18p0); v18repaired = v18p1.Alive; v18wall.ResetRound();
+                    }
+                    Check("M16", "食材变身：面粉+鸡蛋=蛋糕（+护甲）、乱配=黑暗料理、奶茶无限弹药、菜谱表；热巧克力 / 更滑黄油 / 火锅降温；奶油补蛋糕墙",
+                        v18cake && v18dark && v18milk && v18recipes && v18hotChoco && v18slick && v18cooled && v18repaired,
+                        "蛋糕=" + v18cake + " 黑暗料理=" + v18dark + " 奶茶=" + v18milk + " 菜谱=" + v18recipes + "，热巧克力=" + v18hotChoco + " 更滑=" + v18slick + " 降温=" + v18cooled + "，补墙=" + v18repaired);
+
+                    // ---------------- V18 C：奶茶机 / 烤箱 / 冰柜 / 外卖 / 大招 / 转盘
+                    KitchenStation Find(KitchenStation.Kind k) { foreach (var it in Interactable.All) if (it is KitchenStation ks && ks.kind == k) return ks; return null; }
+                    var v18cook2 = Other(att, 2); v18cook2.ammo = 1; v18cook2.grenades = 0;
+                    var v18mt2 = Find(KitchenStation.Kind.MilkTea); bool v18refill = false;
+                    if (v18mt2 != null) { for (float w = 0; w < 1.2f && !v18refill; w += Time.deltaTime) { v18refill = v18mt2.Hold(v18cook2, Time.deltaTime); yield return null; } v18refill = v18refill && v18cook2.ammo == v18cook2.W.magazine && v18cook2.grenades == 1; }
+                    var v18ov = Find(KitchenStation.Kind.Oven); bool v18crispy = false;
+                    if (v18ov != null) { for (float w = 0; w < 5.6f && !v18crispy; w += Time.deltaTime) { v18crispy = v18ov.Hold(v18cook2, Time.deltaTime); yield return null; } v18crispy = v18cook2.Food.crispy; }
+                    var v18fz = Find(KitchenStation.Kind.Freezer); bool v18iceArmor = false; v18cook2.armor = 50;
+                    if (v18fz != null) { for (float w = 0; w < 2f && !v18iceArmor; w += Time.deltaTime) { v18iceArmor = v18fz.Hold(v18cook2, Time.deltaTime); yield return null; } v18iceArmor = v18cook2.armor > Config.MaxArmor; }
+                    v18cook2.armor = 50; v18cook2.Food.crispy = false;
+                    var v18crate = DeliveryCrate.Drop(new Vector3(-36, 0, -2));
+                    for (float w = 0; w < 6f && v18crate != null && !v18crate.Landed; w += Time.deltaTime) yield return null;
+                    var v18opener = Other(att, 0); v18opener.Food.EndForm(false);
+                    if (v18crate != null) Place(v18opener, v18crate.transform.position, 0);
+                    for (float w = 0; w < .5f; w += Time.deltaTime) yield return null;
+                    bool v18opened = v18crate == null && v18opener.Food.Transformed; v18opener.Food.EndForm(false); v18opener.Food.crispy = false;
+                    Fighter v18raven = null; foreach (var f in m.fighters) if (f.role == Role.Raven) v18raven = f;
+                    bool v18ultOk = false;
+                    if (v18raven != null) { v18raven.Food.ult = 1f; v18ultOk = v18raven.Food.TryUlt(); foreach (var e in m.fighters) if (e.team != v18raven.team && e.alive && !e.Revealed) v18ultOk = false; }
+                    var v18rider = Other(def, 2); Place(v18rider, new Vector3(8 + 1.5f, .3f, -2.5f), 0);
+                    for (float w = 0; w < .3f; w += Time.deltaTime) yield return null;
+                    Vector3 v18r0 = v18rider.transform.position;
+                    for (float w = 0; w < 1.2f; w += Time.deltaTime) yield return null;
+                    bool v18spun = Vector3.Distance(v18rider.transform.position, v18r0) > .3f;
+                    Check("M17", "厨房设施：奶茶机补弹药和手雷、烤箱金黄酥脆、冰柜冰护甲；外卖箱空投落地后能开出变身；夜鸦大招全图显示敌人；传菜转盘会带着人转",
+                        v18refill && v18crispy && v18iceArmor && v18opened && (v18raven == null || v18ultOk) && v18spun,
+                        "奶茶机=" + v18refill + " 烤箱=" + v18crispy + " 冰柜=" + v18iceArmor + "，外卖=" + v18opened + "，大招=" + (v18raven == null ? "（本局没有夜鸦）" : v18ultOk.ToString()) + "，转盘=" + v18spun);
+                    foreach (var e in m.fighters) { e.revealedUntil = 0; e.Food.EndForm(false); e.Food.ingredients.Clear(); }
+                }
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
 
@@ -420,6 +496,7 @@ namespace NeonSiege
                 var buyer = Other(def, 2); var oldPhase = m.phase; m.phase = Phase.Prep;
                 var target = Config.Hero(Role.Raven).weapon;                         // DMR-3, 3600 (2520 for Raven)
                 var ar = Config.Hero(Role.Ironwall).weapon;                          // LMG-2
+                if (buyer.W == ar) ar = Config.Hero(Role.Rivet).weapon;              // 买家刚好拿着 LMG-2 时换成 AR-9
                 int priceAr = Config.Price(buyer.Hero, ar); buyer.credits = priceAr + 100; int before = buyer.credits;
                 bool boughtAr = buyer.Buy(ar);
                 bool equipped = buyer.W == ar && buyer.ammo == ar.magazine; int afterAr = buyer.credits;
@@ -618,6 +695,7 @@ namespace NeonSiege
             Place(Other(1, 1), new Vector3(-22, .05f, 6.5f), -70);
             Place(Other(0, 1), new Vector3(-27, .05f, 2.2f), 60);
             Place(Other(0, 2), new Vector3(36, .05f, 30), 200);
+            if (ToonAssets.Available) Other(1, 1).Food.Become(FoodForm.Cake);   // V18：截图里展示一个变身成蛋糕的豆子
             yield return new WaitForSeconds(1.5f);
             var views = new List<(string, Vector3, Vector3, float)>
             {
@@ -635,6 +713,8 @@ namespace NeonSiege
                 ("16_skybridge", new Vector3(-24, 2f, -7), new Vector3(-8, 8.5f, 0), 70),
                 ("20_pancake_tower", new Vector3(-38, 2.2f, 36), new Vector3(-47, 1.5f, 43.5f), 68),
                 ("21_cake_tower", new Vector3(-38, 2.2f, -37), new Vector3(-47, 1.5f, -44), 68),
+                ("22_kitchen", new Vector3(2, 2.6f, -9), new Vector3(10, .5f, -2), 70),
+                ("23_hotpot_station", new Vector3(-22, 2f, -5.5f), new Vector3(-26, 1f, -8.3f), 60),
             };
             if (p != null) { p.SetViewModelVisible(false); p.enabled = false; }
             cam.transform.SetParent(null);

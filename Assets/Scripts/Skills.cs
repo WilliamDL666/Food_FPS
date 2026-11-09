@@ -456,7 +456,7 @@ namespace NeonSiege
 
     public class DeployedCover : MonoBehaviour, IDamageable
     {
-        public Fighter owner; public float hp = Config.CoverHp, absorbed;
+        public Fighter owner; public float hp = Config.CoverHp * (ToonAssets.Available ? 1.3f : 1f), absorbed;   // 铆钉被动：掩体更耐打
         float born; Transform visual; BoxCollider col; UnityEngine.AI.NavMeshObstacle obstacle; bool counted;
         public void Init(Fighter f)
         {

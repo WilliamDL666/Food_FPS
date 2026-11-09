@@ -55,9 +55,40 @@ namespace NeonSiege
         {
             switch (r) { case Role.Falcon: return "Burger"; case Role.Rivet: return "Onigiri"; case Role.Ironwall: return "Pudding"; case Role.Raven: return "Sushi"; case Role.Ember: return "Cupcake"; default: return "Donut"; }
         }
-        public static void AddHat(GameObject model, Role r)
+        static readonly Dictionary<Color, Material> ringMats = new Dictionary<Color, Material>();
+        static Texture2D ringTex;
+        public static Material RingMaterial(Color c)
         {
-            var pf = Resources.Load<GameObject>("Toon/Hats/Hat_" + HatFor(r));
+            if (ringMats.TryGetValue(c, out var m)) return m;
+            if (ringTex == null)
+            {
+                const int N = 128; var px = new Color[N * N];
+                for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) { float r = new Vector2(x - N / 2f + .5f, y - N / 2f + .5f).magnitude / (N / 2f); float a = Mathf.Clamp01(1f - Mathf.Abs(r - .78f) / .14f) + (r < .7f ? .18f * (1 - r) : 0); px[y * N + x] = new Color(1, 1, 1, Mathf.Clamp01(a)); }
+                ringTex = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp }; ringTex.SetPixels(px); ringTex.Apply();
+            }
+            m = new Material(Shader.Find("Sprites/Default")) { mainTexture = ringTex, color = new Color(c.r, c.g, c.b, .85f), renderQueue = 3002 };
+            return ringMats[c] = m;
+        }
+        // 把一个模型放到角色头顶（变身时的大菜），跟着头部骨骼动
+        public static GameObject AttachAbove(GameObject model, string path, float height, float lift)
+        {
+            var pf = Resources.Load<GameObject>(path); if (pf == null) return null;
+            Transform headBone = null; Bounds b = new Bounds(); bool any = false;
+            foreach (var t in model.GetComponentsInChildren<Transform>()) if (t.name == "Head" && t.GetComponent<Renderer>() == null) headBone = t;
+            foreach (var rr in model.GetComponentsInChildren<Renderer>()) if (rr.enabled && !IsGunNode(rr.name) && rr.name != "美食帽子") { if (!any) { b = rr.bounds; any = true; } else b.Encapsulate(rr.bounds); }
+            if (!any) return null;
+            var o = Object.Instantiate(pf); o.name = "变身大菜";
+            foreach (var c in o.GetComponentsInChildren<Collider>()) Object.Destroy(c);
+            Arena.Fit(o, new Vector3(0, height, 0));
+            o.transform.position += new Vector3(headBone != null ? headBone.position.x : b.center.x, b.max.y + lift, headBone != null ? headBone.position.z : b.center.z);
+            o.transform.SetParent(headBone != null ? headBone : model.transform, true);
+            return o;
+        }
+
+        public static void AddHat(GameObject model, Role r, string overrideHat = null)
+        {
+            var pf = Resources.Load<GameObject>("Toon/Hats/Hat_" + (string.IsNullOrEmpty(overrideHat) ? HatFor(r) : overrideHat));
+            if (pf == null) pf = Resources.Load<GameObject>("Toon/Hats/Hat_" + HatFor(r));
             if (pf == null) return;
             Transform headBone = null; Bounds b = new Bounds(); bool any = false;
             foreach (var t in model.GetComponentsInChildren<Transform>()) if (t.name == "Head" && t.GetComponent<Renderer>() == null) headBone = t;
@@ -122,7 +153,7 @@ namespace NeonSiege
                 var mats = r.materials;
                 for (int i = 0; i < mats.Length; i++)
                 {
-                    string n = mats[i].name.Replace(" (Instance)", "");
+                    string n = System.Text.RegularExpressions.Regex.Replace(mats[i].name.Replace(" (Instance)", ""), @"\.\d+$", "");   // V18：Blender 导出会加 .001 后缀
                     Color? c = null;
                     bool head = r.name == "Head" || r.name.EndsWith("_Head");
                     if (n == "Character_Main" || n == "Hazmat_Main" && !head || n == "Enemy_Red" && !head) c = team;               // body = team colour
@@ -143,12 +174,15 @@ namespace NeonSiege
     [RequireComponent(typeof(Camera))]
     public class ToonOutline : MonoBehaviour
     {
-        CommandBuffer cb; Material mat; Camera cam;
+        CommandBuffer cb; Material mat, enemyMat, mateMat; Camera cam;
         void OnEnable()
         {
             cam = GetComponent<Camera>();
             var baseMat = Resources.Load<Material>("Materials/Outline"); if (baseMat == null) return;
             mat = new Material(baseMat); mat.SetColor("_Color", new Color(.03f, .03f, .05f)); mat.SetFloat("_Width", .012f);
+            // V18：敌人红色粗描边，队友蓝色描边
+            enemyMat = new Material(baseMat); enemyMat.SetColor("_Color", new Color(1f, .12f, .15f)); enemyMat.SetFloat("_Width", .02f);
+            mateMat = new Material(baseMat); mateMat.SetColor("_Color", new Color(.2f, .65f, 1f)); mateMat.SetFloat("_Width", .014f);
             cb = new CommandBuffer { name = "Toon Outline" };
             cam.AddCommandBuffer(CameraEvent.AfterForwardOpaque, cb);
         }
@@ -160,12 +194,13 @@ namespace NeonSiege
             foreach (var f in Match.I.fighters)
             {
                 if (f.avatar == null || f == Match.I.player && f.alive) continue;
+                var me = Match.I.player; var om = !f.alive || me == null ? mat : f.team == me.team ? mateMat : enemyMat;
                 foreach (var r in f.avatar.GetComponentsInChildren<Renderer>())
                 {
                     if (!r.enabled || !r.gameObject.activeInHierarchy || r.shadowCastingMode == ShadowCastingMode.ShadowsOnly) continue;
                     Mesh m = r is SkinnedMeshRenderer s ? s.sharedMesh : (r.GetComponent<MeshFilter>() ? r.GetComponent<MeshFilter>().sharedMesh : null);
                     if (m == null) continue;
-                    for (int i = 0; i < m.subMeshCount; i++) cb.DrawRenderer(r, mat, i);
+                    for (int i = 0; i < m.subMeshCount; i++) cb.DrawRenderer(r, om, i);
                 }
             }
         }

@@ -90,3 +90,10 @@ CC-BY 3.0 要求署名：以上作者已在此列出；如果发布作品，请�
 | 豆子角色身体、6 顶美食帽子 | Blender 脚本自建模（`Tools/blender_bean_character.py`），骨骼和动作沿用 Quaternius Toon Shooter（CC0） | 原创 + CC0 |
 | 4 种美食方块、松饼塔 | Blender 脚本自建模（`Tools/blender_food_props.py`） | 原创 |
 | 13 种卡通音效（food_*.wav） | Python 程序合成（`Tools/synth_food_sfx.py`） | 原创 |
+
+
+## V18 新增
+| 用途 | 资源 | 来源 / 授权 |
+| --- | --- | --- |
+| 13 种食材、奶茶机 / 烤箱 / 冰柜 / 火锅回血炉 / 外卖箱 / 传菜转盘 / 曼妥思可乐 / 盘子、3 顶特别帽子 | Blender 脚本自建模（`Tools/blender_kitchen.py`） | 原创 |
+| 背景音乐、火锅咕嘟声 | Python 程序合成（`Tools/synth_food_music.py`） | 原创 |

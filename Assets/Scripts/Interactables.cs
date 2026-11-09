@@ -599,6 +599,17 @@ namespace NeonSiege
             }
         }
 
+        // V18：奶油补墙 —— 补回一块和它相邻的、已经被打掉的蛋糕块
+        public void RepairNear(WallPiece src)
+        {
+            foreach (var q in pieces)
+                if (!q.Alive && Mathf.Abs(q.ix - src.ix) + Mathf.Abs(q.iy - src.iy) <= 2)
+                {
+                    q.Restore(); Fx.Burst(q.transform.position, Vector3.up, new Color(1f, .7f, .85f), 10, 2f, .06f, .5f, .4f);
+                    Sfx.Play("food_squish", q.transform.position, .5f, 1.3f, 1f, 20f); break;
+                }
+        }
+
         public void ResetRound()
         {
             foreach (var p in pieces) p.Restore();

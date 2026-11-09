@@ -85,15 +85,17 @@ namespace NeonSiege
                 }
             }
             Sfx.Play("boom_far", p, .7f, 1f, 1f, 400f);
+            if (ToonAssets.Available) MentosPile.TryFountain(p, owner);   // 汽水 + 曼妥思
+            float rad = Radius * (ToonAssets.Available && owner != null && owner.role == Role.Ember ? 1.2f : 1f);   // 焚芯被动
             if (Match.I != null)
                 foreach (var f in Match.I.fighters)
                 {
                     if (!f.alive) continue;
                     float d = Vector3.Distance(f.Chest, p);
-                    if (d > Radius) continue;
+                    if (d > rad) continue;
                     if (owner != null && f != owner && f.team == owner.team) continue;
                     if (!Skills.LineClear(p + Vector3.up * .2f, f.Chest, f)) continue;
-                    float dmg = MaxDamage * Mathf.Clamp01(1f - d / Radius) * (f == owner ? .5f : 1f);
+                    float dmg = MaxDamage * Mathf.Clamp01(1f - d / rad) * (f == owner ? .5f : 1f);
                     if (dmg < 4f) continue;
                     f.ReceiveDamage(dmg, owner, p, false, true);
                     if (owner != null && owner.human && f != owner) { owner.hitMarkerUntil = Time.time + .25f; owner.hitMarkerHead = false; owner.hitMarkerKill = !f.alive; Fx.AddNumber(f.Chest, dmg, false, false, !f.alive, f); }

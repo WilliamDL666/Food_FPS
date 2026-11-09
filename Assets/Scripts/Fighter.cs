@@ -54,6 +54,11 @@ namespace NeonSiege
         public bool crouching, aiming, sprinting, grounded;
         public Vector3 velocity;
         public float revealedUntil, hiddenFromScanUntil, jammedUntil;
+        // V18：美食大作战（食材、变身、大招……都在 FoodState 里）
+        public float freezeUntil; FoodState food;
+        public FoodState Food { get { if (food == null) { food = GetComponent<FoodState>() ?? gameObject.AddComponent<FoodState>(); food.f = this; } return food; } }
+        public bool FoodAim { get { return ToonAssets.Available && aiming && aimedAt > 0 && Time.time - aimedAt > .1f; } }
+        public void Freeze(float t) { freezeUntil = Mathf.Max(freezeUntil, Time.time + t); }
         public float lastDamageAt; public Vector3 lastDamageFrom; public float lastArmorBreakAt = -10;
         public float hitMarkerUntil; public bool hitMarkerKill, hitMarkerHead; public float armorBreakMarkAt = -10; float fovKick;
         public float killBannerUntil; public string killBanner = "";
@@ -117,6 +122,7 @@ namespace NeonSiege
         public void Init(int t, bool isHuman, Role r, int s)
         {
             team = t; human = isHuman; role = r; slot = s;
+            if (ToonAssets.Available) Food.f = this;
             cc = GetComponent<CharacterController>();
             cc.height = 1.92f; cc.radius = .4f; cc.center = new Vector3(0, .96f, 0); cc.stepOffset = .45f; cc.slopeLimit = 45;
             if (human)
@@ -220,7 +226,8 @@ namespace NeonSiege
             if (avatar != null) avatar.Revive();
             if (builtFor != W) BuildVisuals();
             if (human) { AttachCamera(); if (viewPivot != null) viewPivot.gameObject.SetActive(true); }
-            SetHeight(false);
+            SetHeight(false); freezeUntil = 0;
+            if (ToonAssets.Available) Food.OnRespawn();
         }
 
         void SetHeight(bool crouch)
@@ -276,6 +283,13 @@ namespace NeonSiege
                     if (canAct && grenades > 0 && Input.GetKey(KeyCode.Alpha4)) PreviewGrenade(true);
                     if (Input.GetKeyUp(KeyCode.Alpha4)) { PreviewGrenade(false); if (canAct && grenades > 0) ThrowGrenade(Grenade.HumanVelocity(this)); }
                     if (canAct && Input.GetKeyDown(KeyCode.V)) Melee();
+                    if (ToonAssets.Available)
+                    {
+                        if (canAct && Input.GetKeyDown(KeyCode.X)) Food.TryUlt();   // V18：大招
+                        if (Input.GetKeyDown(KeyCode.Alpha1)) Food.Emote("Wave");    // 表情
+                        if (Input.GetKeyDown(KeyCode.Alpha2)) Food.Emote("Yes");
+                        if (Input.GetKeyDown(KeyCode.Alpha3)) Food.Emote("No");
+                    }
                     Skills.HumanInput(this, canAct);
                 }
                 else
@@ -319,12 +333,14 @@ namespace NeonSiege
             if (ShieldUp) speed *= Config.ShieldMoveMultiplier;
             if (Time.time < jammedUntil) speed *= Config.NoiseSlow;
             if (Time.time < creamUntil) speed *= .85f;
+            if (ToonAssets.Available) speed *= Food.SpeedMul();
+            if (Time.time < freezeUntil) speed *= .1f;   // 被冰淇淋冻住
             int sauce = grounded ? SauceZone.At(transform.position) : SauceZone.None;
             if (sauce == SauceZone.Chocolate) speed *= .7f;   // V17：巧克力酱黏脚
             else if (sauce == SauceZone.Butter) speed *= 1.1f;
             if (Match.I.BombCarrier == this) speed *= .96f;
             Vector3 target = Vector3.ClampMagnitude(wish, 1f) * speed;
-            float accel = grounded ? (sauce == SauceZone.Butter ? 4.5f : 40f) : 6f;   // 黄油地面打滑
+            float accel = grounded ? (sauce == SauceZone.Butter ? (SauceZone.SlickAt(transform.position) ? 2f : 4.5f) : 40f) : 6f;   // 黄油地面打滑
             Vector3 planar = new Vector3(velocity.x, 0, velocity.z);
             // 弹射板飞行中保持惯性（不按方向键就不减速），保证能落到高台上
             if (launched && !grounded) { if (wish.sqrMagnitude > .01f) planar = Vector3.MoveTowards(planar, planar + target * .25f, 2f * Time.deltaTime); }
@@ -557,6 +573,7 @@ namespace NeonSiege
             if (Time.time - lastShotAt > .28f) sprayShots = 0;
             sprayShots++;
             ammo--; stats.shots++; lastShotAt = Time.time;
+            if (ToonAssets.Available && Food.InfiniteAmmo) ammo++;   // 奶茶杯形态：开火不耗弹药
             Vector3 origin = human ? cam.transform.position : Eye;   // Eye/camera include the lean offset
             Vector3 dir = human ? cam.transform.forward : AimDir;
             float spread = CurrentSpread();
@@ -621,9 +638,12 @@ namespace NeonSiege
                 float falloff = Falloff(distance, w);
                 bool head = h.point.y >= f.transform.position.y + (f.crouching ? 1.02f : 1.55f);
                 float dmg = w.bodyDamage * falloff * (head ? (w.pellets > 1 ? 1.4f : Config.HeadMultiplier) : 1f);
+                if (!FoodState.Incoming(f, this, dir, ref dmg)) return true;   // 幻频甩糖 / 汉堡盾
                 bool armorHit = f.armor > 0;
                 bool killed = f.ReceiveDamage(dmg, this, transform.position, head);
                 stats.hits++; if (head) stats.headshots++;
+                FoodState.OnHit(this, f, dmg);
+                if (killed && ToonAssets.Available) { if (human) Collection.AddKill(); else if (Random.value < .35f) Food.Emote("Wave"); }
                 if (ToonAssets.Available && w.id == "BR-5") f.creamUntil = Time.time + .8f;   // 奶油糊在身上：短暂减速
                 if (human)
                 {
@@ -652,6 +672,10 @@ namespace NeonSiege
             var target = h.collider.GetComponentInParent<IDamageable>();
             if (target != null)
             {
+                if (ToonAssets.Available && w.id == "BR-5" && target is WallPiece wp && wp.wall != null && wp.wall.layers != null)
+                {   // 奶油打到蛋糕墙：把旁边打掉的块补回来
+                    wp.wall.RepairNear(wp); FoodFx.Impact(h.point, h.normal, w); return true;
+                }
                 float coverDmg = w.bodyDamage * Falloff(distance, w) * (role == Role.Ironwall ? 1.25f : 1f);
                 if (target.TakeDamage(coverDmg, this, false))
                 {
@@ -661,7 +685,7 @@ namespace NeonSiege
                 }
                 return false;
             }
-            if (ToonAssets.Available) { FoodFx.Impact(h.point, h.normal, w); return true; }   // V17：墙上地上留下酱汁
+            if (ToonAssets.Available) { FoodReact.OnImpact(this, h, w); FoodFx.Impact(h.point, h.normal, w); return true; }   // V17：墙上地上留下酱汁
             Fx.Sparks(h.point, h.normal, new Color(1f, .75f, .4f), 7);
             Fx.Burst(h.point, h.normal, new Color(.5f, .5f, .52f, .5f), 4, 1.2f, .12f, .6f, .1f, Fx.Smoke);
             Fx.BulletHole(h.point, h.normal, Random.value < .3f);
@@ -707,6 +731,7 @@ namespace NeonSiege
         {
             if (!alive || Match.I.phase != Phase.Live) return false;
             if (Time.time < guardUntil) amount *= 1f - Config.DashDamageReduction;
+            if (explosive && ToonAssets.Available && role == Role.Ironwall) amount *= .5f;   // 铁幕被动
             float total = amount;
             float toArmor = Mathf.Min(armor, amount);
             armor -= toArmor; amount -= toArmor;
@@ -738,6 +763,7 @@ namespace NeonSiege
         void Die(Fighter killer, bool head)
         {
             hp = 0; alive = false; stats.deaths++; bombBusy = false;
+            if (ToonAssets.Available) Food.OnDeath();
             if (ToonAssets.Available) FoodFx.KillPop(Chest);   // V17：噗——变成一团彩带
             else
             {
@@ -813,7 +839,7 @@ namespace NeonSiege
             viewPivot.localRotation = Quaternion.Slerp(viewPivot.localRotation, rot, Time.deltaTime * 14f);
             if (viewParts != null && viewParts.mag != null) viewParts.mag.gameObject.SetActive(!IsReloading || ReloadProgress > .55f);
             // Through a magnified optic the weapon model is hidden and the UI draws the scope picture.
-            if (viewGun != null) viewGun.gameObject.SetActive(!Scoped);
+            if (viewGun != null) viewGun.gameObject.SetActive(!Scoped && !FoodAim);   // V18：开镜时枪模收起，换成美食准镜
             if (muzzleLight != null && muzzleLight.intensity > 0) { muzzleLight.intensity = Mathf.MoveTowards(muzzleLight.intensity, 0, Time.deltaTime * 70f); if (muzzleLight.intensity <= 0) muzzleFlash.enabled = false; }
         }
 

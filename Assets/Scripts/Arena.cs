@@ -677,8 +677,34 @@ namespace NeonSiege
                 var hp = new Vector3(8, 0, -35.5f);
                 ClimbFood("HotPot", hp, .9f, 0, new Vector2(1.5f, 1.0f));
                 var hz = new GameObject("火锅烫伤区"); hz.transform.position = hp; hz.AddComponent<HotpotHazard>(); hz.transform.SetParent(transform, true);
-                BigSteam(hp + Vector3.up * 1.2f, 2.2f, .5f);
+                SteamCloud.particles.Add(BigSteam(hp + Vector3.up * 1.2f, 2.2f, .5f));
                 SteamCloud.Add(hp + Vector3.up * 2.6f, 2.6f);
+            }
+            // V18：食材刷新点
+            foreach (var sp in new[] { new Vector3(-45, 0, -4), new Vector3(-30, 0, 5.2f), new Vector3(-12, 0, -5.5f), new Vector3(14, 0, 0), new Vector3(24, 0, -7.5f),
+                new Vector3(-52, 0, 40), new Vector3(-22, 0, 44), new Vector3(2, 0, 36), new Vector3(-52, 0, -39.5f), new Vector3(-24, 0, -41), new Vector3(2, 0, -34),
+                new Vector3(24, 0, -36), new Vector3(39, 0, 22.5f), new Vector3(40, 0, -30), new Vector3(-21, 0, 14), new Vector3(-33, 0, -14), new Vector3(52.5f, 0, -8), new Vector3(-60, 0, 14) })
+            { var g = new GameObject("食材刷新点"); g.transform.position = sp; g.AddComponent<IngredientSpot>(); g.transform.SetParent(transform, true); }
+            // V18：厨房设施
+            void Station(KitchenStation.Kind k, Vector3 p, float rotY) { var g = new GameObject("厨房 " + k); g.transform.position = p; g.transform.rotation = Quaternion.Euler(0, rotY, 0); g.AddComponent<KitchenStation>().Build(k); g.transform.SetParent(transform, true); }
+            Station(KitchenStation.Kind.HotpotHeal, new Vector3(-26, 0, -8.3f), 0); Station(KitchenStation.Kind.HotpotHeal, new Vector3(53, 0, -14), 0); Station(KitchenStation.Kind.HotpotHeal, new Vector3(-36, 0, 33.6f), 0);
+            Station(KitchenStation.Kind.MilkTea, new Vector3(-58.5f, 0, 8.5f), 180); Station(KitchenStation.Kind.MilkTea, new Vector3(58.5f, 0, -8.5f), 0);
+            Station(KitchenStation.Kind.Oven, new Vector3(16, 0, -12.4f), 0); Station(KitchenStation.Kind.Freezer, new Vector3(16, 0, 12.4f), 180);
+            // V18：传菜转盘（站上去会被带着转）
+            {
+                var tg = new GameObject("传菜转盘"); tg.transform.position = new Vector3(8, 0, -2.5f); tg.transform.SetParent(transform, true);
+                var tt = tg.AddComponent<Turntable>(); tt.Build();
+                var col = new GameObject("转盘碰撞"); col.transform.SetParent(tg.transform, false); col.transform.localPosition = new Vector3(0, .125f, 0); col.transform.localScale = new Vector3(4.5f, .125f, 4.5f);
+                var mc = col.AddComponent<MeshCollider>(); mc.sharedMesh = ColliderCylinder(); mc.convex = true;
+            }
+            // V18：曼妥思 + 可乐（汽水手雷炸到这里会喷泉）
+            foreach (var mp in new[] { new Vector3(-17, 0, 40.5f), new Vector3(-17, 0, -40.5f) })
+            {
+                var mg = new GameObject("曼妥思可乐"); mg.transform.position = mp; mg.transform.SetParent(transform, true);
+                var mm = Model("Toon/Kitchen/Mentos"); if (mm != null) { foreach (var c in mm.GetComponentsInChildren<Collider>()) Kill(c); Fit(mm, new Vector3(0, 1.7f, 0)); mm.transform.SetParent(mg.transform, false); }
+                var cc = new GameObject("瓶子碰撞"); cc.transform.SetParent(mg.transform, false); cc.transform.localPosition = new Vector3(0, .85f, 0); cc.transform.localScale = new Vector3(.6f, .85f, .6f);
+                var mc2 = cc.AddComponent<MeshCollider>(); mc2.sharedMesh = ColliderCylinder(); mc2.convex = true;
+                mg.AddComponent<MentosPile>();
             }
             // 出生区顶棚招牌
             Food("Donut", new Vector3(-64, 4.45f, 0), 90, 3.2f);
@@ -687,7 +713,7 @@ namespace NeonSiege
             foreach (var hp in new[] { new Vector3(-2, 21.4f, 20), new Vector3(30, 28.4f, 56), new Vector3(-40, 28.4f, -55) }) BigSteam(hp, 2f, .25f);
         }
 
-        void BigSteam(Vector3 p, float radius, float alpha)
+        ParticleSystem BigSteam(Vector3 p, float radius, float alpha)
         {
             var go = new GameObject("火锅热气"); go.transform.position = p; go.transform.SetParent(transform, true);
             var ps = go.AddComponent<ParticleSystem>();
@@ -698,6 +724,7 @@ namespace NeonSiege
             var col = ps.colorOverLifetime; col.enabled = true;
             var g = new Gradient(); g.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) }, new[] { new GradientAlphaKey(0, 0), new GradientAlphaKey(1, .2f), new GradientAlphaKey(0, 1) }); col.color = g;
             go.GetComponent<ParticleSystemRenderer>().material = Resources.Load<Material>("Materials/FxSmoke") ?? Fx.Additive;
+            return ps;
         }
 
         // ------------------------------------------------------------------ layout
@@ -1685,6 +1712,9 @@ namespace NeonSiege
             foreach (var g in glass) g.ResetRound();
             foreach (var c in cams) c.ResetRound();
             foreach (var w in breakWalls) w.ResetRound();
+            foreach (var sp in IngredientSpot.All.ToArray()) sp.ResetRound();
+            foreach (var ip in IngredientPickup.Live.ToArray()) if (ip != null && ip.spot == null) Destroy(ip.gameObject);
+            foreach (var dc in DeliveryCrate.Live.ToArray()) if (dc != null) Destroy(dc.gameObject);
         }
 
         public bool IsBuildLegal(Vector3 p)

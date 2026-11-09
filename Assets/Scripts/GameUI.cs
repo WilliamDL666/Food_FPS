@@ -360,6 +360,7 @@ namespace NeonSiege
         {
             float cx = W / 2;
             if (Match.FFA) { FFATopBar(W); return; }
+            if (Match.Mode == GameMode.Cook) { CookTopBar(W); return; }
             Rect r = new Rect(cx - 250, 12, 500, 78);
             Round(r, Panel0, 12); Round(r, new Color(.25f, .7f, .9f, .35f), 12, 1.2f);
             Round(new Rect(cx - 250, 12, 120, 78), new Color(Config.Blue.r, Config.Blue.g, Config.Blue.b, .25f), 12);
@@ -560,7 +561,8 @@ namespace NeonSiege
                 { c = new Color(.35f, 1f, .45f, .95f); Shadowed(new Rect(cx - 60, cy + 18, 120, 20), "友军 · " + mate.Hero.name, With(small, 13, TextAnchor.MiddleCenter), c); }
             }
             bool scoped = p.Scoped;
-            if (scoped) ScopeView(W, H, p);
+            if (ToonAssets.Available && p.aiming) { }   // V18：开镜时由 FoodHud 画美食准镜
+            else if (scoped) ScopeView(W, H, p);
             else if (p.aiming && p.W.sight == "scope") Fill(new Rect(0, 0, W, H), new Color(0, 0, 0, .6f));   // brief blackout while the optic comes up
             else if (!p.aiming || p.W.sight == "none")
             {
@@ -738,7 +740,7 @@ namespace NeonSiege
             Vector2 c = new Vector2(W / 2, H / 2 + 92);
             if (k > 0) Ring(c, 30, k, col, 4);
             Round(new Rect(c.x - 15, c.y - 15, 30, 30), new Color(.05f, .08f, .12f, .85f), 6);
-            Text(new Rect(c.x - 15, c.y - 15, 30, 30), "E", With(centered, 17, TextAnchor.MiddleCenter), col);
+            Text(new Rect(c.x - 15, c.y - 15, 30, 30), "G", With(centered, 17, TextAnchor.MiddleCenter), col);   // V18：交互键是 G
             float tw = label.Length * 17 + 30;
             Round(new Rect(c.x - tw / 2, c.y + 36, tw, 32), new Color(.03f, .05f, .09f, .8f), 8);
             Text(new Rect(c.x - tw / 2, c.y + 36, tw, 32), label, With(normal, 17, TextAnchor.MiddleCenter));
@@ -912,7 +914,7 @@ namespace NeonSiege
             GUI.Label(new Rect(x + 36, y + 96, pw - 72, 70), ToonAssets.Available ? "攻方带着生日蛋糕，在 A 或 B 点按住 G 放下蛋糕并点燃蜡烛（4 秒），40 秒后蛋糕爆炸即获胜。守方阻止放蛋糕，或在爆炸前按住 G 吹灭蜡烛（6 秒）。打倒所有敌人不会直接结束回合。回合内不复活，每回合攻守互换，先赢 5 回合获胜。地图上的零食按 G 吃掉可以回血。" : "攻方携带棱能炸弹，在 A 或 B 点按住 G 安装（4 秒），炸弹 40 秒后引爆即获胜。守方阻止安装，或在引爆前按住 G 拆除（6 秒）。击杀所有敌人不会直接结束回合——攻方必须真正引爆炸弹。回合内不复活，每回合结束攻守互换，先赢 5 回合获胜。", wrap);
             Fill(new Rect(x + 34, y + 172, pw - 68, 1), new Color(.25f, .5f, .6f));
             Text(new Rect(x + 36, y + 182, 400, 32), "操作", large);
-            string[] keys = { "WASD 移动 · 鼠标 瞄准 · 左键 射击 · 右键 切换开镜", "Q / E 左右探头 · Shift 冲刺 · Ctrl/C 蹲伏（冲刺中=滑铲）· Space 跳跃/翻越", "R 换弹 · 4 手雷（按住瞄准）· V 近战", "F 技能（投掷/部署类：按住预览、松开施放）· G（按住）安装/拆除炸弹、交互", "B 购买武器（准备阶段）· Tab 数据 · M 大地图 · H 帮助 · Esc 暂停", "+ / - 调整鼠标灵敏度" };
+            string[] keys = { "WASD 移动 · 鼠标 瞄准 · 左键 射击 · 右键 切换开镜", "Q / E 左右探头 · Shift 冲刺 · Ctrl/C 蹲伏（冲刺中=滑铲）· Space 跳跃/翻越", "R 换弹 · 4 手雷（按住瞄准）· V 近战（平底锅，能挡正面子弹）· X 大招 · 1/2/3 表情", "F 技能（投掷/部署类：按住预览、松开施放）· G（按住）安装/拆除炸弹、交互", "B 购买武器（准备阶段）· Tab 数据 · M 大地图 · H 帮助 · Esc 暂停", "+ / - 调整鼠标灵敏度" };
             for (int i = 0; i < keys.Length; i++) Text(new Rect(x + 36, y + 220 + i * 30, pw * .48f, 28), keys[i], small);
             Text(new Rect(x + pw * .52f, y + 182, 400, 32), "场景互动", large);
             string[] map = { "卷帘门：A/B 连廊，G 升降，会发出噪音", "电闸：拉闸让包点断电 20 秒（灯光与霓虹全灭）", "爆炸桶：射击后短暂引燃再爆炸，伤害所有人", "橱窗/厂房玻璃：可击碎，打开新视线", "医疗站：每回合一次 +50 生命 +25 护甲", "铁门：南北长街各一道，唯一通路，开门巨响", "弹射板：把你弹上集装箱 / 水塔 / 市场楼顶狙击位", "守方监控：会暴露进攻方位置，可以打掉", "B 点侧门：门禁终端开启 · 黄灯条木箱可被摧毁" };
@@ -1037,20 +1039,39 @@ namespace NeonSiege
             }
         }
 
+        // V18：抢食大作战 HUD
+        void CookTopBar(float W)
+        {
+            float cx = W / 2; Rect r = new Rect(cx - 260, 12, 520, 78);
+            Round(r, Panel0, 12); Round(r, new Color(1f, .55f, .8f, .45f), 12, 1.4f);
+            Round(new Rect(cx - 260, 12, 130, 78), new Color(Config.Blue.r, Config.Blue.g, Config.Blue.b, .25f), 12);
+            Round(new Rect(cx + 130, 12, 130, 78), new Color(Config.Red.r, Config.Red.g, Config.Red.b, .25f), 12);
+            Text(new Rect(cx - 260, 14, 130, 50), game.roundsWon[0].ToString(), With(huge, 44, TextAnchor.MiddleCenter));
+            Text(new Rect(cx + 130, 14, 130, 50), game.roundsWon[1].ToString(), With(huge, 44, TextAnchor.MiddleCenter));
+            Text(new Rect(cx - 260, 60, 130, 24), "蓝队大锅", With(tiny, 13, TextAnchor.MiddleCenter), Config.Blue);
+            Text(new Rect(cx + 130, 60, 130, 24), "红队大锅", With(tiny, 13, TextAnchor.MiddleCenter), Config.Red);
+            int t = Mathf.CeilToInt(game.phase == Phase.Prep ? game.phaseTimer : game.roundClock);
+            Text(new Rect(cx - 130, 12, 260, 52), game.phase == Phase.Prep ? t.ToString() : (t / 60) + ":" + (t % 60).ToString("00"), With(huge, 42, TextAnchor.MiddleCenter));
+            Text(new Rect(cx - 130, 60, 260, 24), "抢食大作战 · 先到 " + Match.CookTarget + " 分", With(tiny, 13, TextAnchor.MiddleCenter), new Color(1f, .75f, .9f));
+            var p = game.player;
+            if (p != null && !p.alive && game.phase == Phase.Live) Text(new Rect(0, 140, W, 40), "复活中… " + Mathf.Max(0, game.FFARespawnIn(p)).ToString("0.0") + " 秒", With(normal, 24, TextAnchor.MiddleCenter), new Color(1f, .85f, .9f));
+        }
+
         // V17：美食大乱斗 HUD
         void FFATopBar(float W)
         {
             float cx = W / 2; Rect r = new Rect(cx - 280, 12, 560, 78);
             Round(r, Panel0, 12); Round(r, new Color(1f, .55f, .8f, .45f), 12, 1.4f);
-            var p = game.player; int mine = p != null ? game.FFAKills(p) : 0;
-            Fighter lead = game.FFALeader(); int best = lead != null ? game.FFAKills(lead) : 0;
+            var p = game.player; bool grow = Match.Mode == GameMode.Grow;
+            int mine = p != null ? (grow ? p.Food.growLevel : game.FFAKills(p)) : 0;
+            Fighter lead = game.FFALeader(); int best = lead != null ? (grow ? lead.Food.growLevel : game.FFAKills(lead)) : 0;
             Text(new Rect(cx - 280, 14, 140, 50), mine.ToString(), With(huge, 44, TextAnchor.MiddleCenter), new Color(1f, .85f, .4f));
-            Text(new Rect(cx - 280, 60, 140, 24), "你的击杀", With(tiny, 13, TextAnchor.MiddleCenter), new Color(1f, .85f, .4f));
+            Text(new Rect(cx - 280, 60, 140, 24), grow ? "你的体型" : "你的击杀", With(tiny, 13, TextAnchor.MiddleCenter), new Color(1f, .85f, .4f));
             Text(new Rect(cx + 140, 14, 140, 50), best.ToString(), With(huge, 44, TextAnchor.MiddleCenter), lead != null ? Config.TeamColor(lead.team) : Color.white);
             Text(new Rect(cx + 140, 60, 140, 24), "领先 · " + (lead != null ? lead.Hero.name : "-"), With(tiny, 13, TextAnchor.MiddleCenter), lead != null ? Config.TeamColor(lead.team) : Color.white);
             int t = Mathf.CeilToInt(game.phase == Phase.Prep ? game.phaseTimer : game.roundClock);
             Text(new Rect(cx - 140, 12, 280, 52), game.phase == Phase.Prep ? t.ToString() : (t / 60) + ":" + (t % 60).ToString("00"), With(huge, 42, TextAnchor.MiddleCenter), t <= 15 && game.phase == Phase.Live ? new Color(1f, .5f, .4f) : Color.white);
-            Text(new Rect(cx - 140, 60, 280, 24), "美食大乱斗 · 先到 " + Match.FFATarget + " 杀获胜", With(tiny, 13, TextAnchor.MiddleCenter), new Color(1f, .75f, .9f));
+            Text(new Rect(cx - 140, 60, 280, 24), grow ? "吃货变大 · 时间到时最大的人获胜" : "美食大乱斗 · 先到 " + Match.FFATarget + " 杀获胜", With(tiny, 13, TextAnchor.MiddleCenter), new Color(1f, .75f, .9f));
             if (p != null && !p.alive && game.phase == Phase.Live) Text(new Rect(0, 140, W, 40), "复活中… " + Mathf.Max(0, game.FFARespawnIn(p)).ToString("0.0") + " 秒", With(normal, 24, TextAnchor.MiddleCenter), new Color(1f, .85f, .9f));
         }
 
@@ -1058,15 +1079,15 @@ namespace NeonSiege
         {
             float pw = Mathf.Min(900, W - 40), x = (W - pw) / 2, y = final ? H * .24f : 130, rowH = 44;
             PanelBox(new Rect(x, y, pw, 70 + rowH * game.fighters.Count), 16);
-            string[] head = { "选手", "击杀", "阵亡", "伤害", "命中率" }; float[] cols = { 0, .45f, .58f, .71f, .84f };
+            string[] head = { "选手", Match.Mode == GameMode.Grow ? "体型 / 击杀" : "击杀", "阵亡", "伤害", "命中率" }; float[] cols = { 0, .45f, .58f, .71f, .84f };
             for (int i = 0; i < head.Length; i++) Text(new Rect(x + 24 + cols[i] * pw, y + 14, 160, 26), head[i], tiny);
-            var list = new List<Fighter>(game.fighters); list.Sort((a, b) => game.FFAKills(b).CompareTo(game.FFAKills(a)));
+            var list = new List<Fighter>(game.fighters); list.Sort((a, b) => game.FFAScore(b).CompareTo(game.FFAScore(a)));
             for (int row = 0; row < list.Count; row++)
             {
                 var f = list[row]; float yy = y + 46 + row * rowH; Color tc = Config.TeamColor(f.team);
                 Round(new Rect(x + 14, yy, pw - 28, rowH - 6), new Color(tc.r, tc.g, tc.b, f.human ? .32f : .12f), 8);
                 var st = Live(f);
-                string[] vals = { (row + 1) + ". " + f.Hero.name + (f.human ? "（你）" : "") + (f.alive ? "" : " ✕"), game.FFAKills(f).ToString(), game.FFADeaths(f).ToString(), st.damage.ToString("0"), st.shots > 0 ? (100f * st.hits / st.shots).ToString("0") + "%" : "-" };
+                string[] vals = { (row + 1) + ". " + f.Hero.name + (f.human ? "（你）" : "") + (f.alive ? "" : " ✕"), Match.Mode == GameMode.Grow ? f.Food.growLevel + " 级 / " + game.FFAKills(f) : game.FFAKills(f).ToString(), game.FFADeaths(f).ToString(), st.damage.ToString("0"), st.shots > 0 ? (100f * st.hits / st.shots).ToString("0") + "%" : "-" };
                 for (int i = 0; i < vals.Length; i++) Text(new Rect(x + 24 + cols[i] * pw, yy, 220, rowH - 6), vals[i], normal, i == 0 ? tc : (Color?)null);
             }
         }
@@ -1107,15 +1128,18 @@ namespace NeonSiege
             if (Match.FFA)
             {
                 var lead = game.FFALeader();
-                Text(new Rect(0, H * .08f, W, 80), (lead != null ? lead.Hero.name + (lead.human ? "（你）" : "") : "无人") + " 赢得美食大乱斗！", With(huge, 60, TextAnchor.MiddleCenter), lead != null ? Config.TeamColor(lead.team) : Color.white);
-                Text(new Rect(0, H * .08f + 80, W, 34), (lead != null ? game.FFAKills(lead) + " 杀" : "") + "   ·   先到 " + Match.FFATarget + " 杀获胜", With(normal, 20, TextAnchor.MiddleCenter));
+                Text(new Rect(0, H * .08f, W, 80), (lead != null ? lead.Hero.name + (lead.human ? "（你）" : "") : "无人") + " 赢得" + Match.ModeName(Match.Mode) + "！", With(huge, 60, TextAnchor.MiddleCenter), lead != null ? Config.TeamColor(lead.team) : Color.white);
+                Text(new Rect(0, H * .08f + 80, W, 34), lead == null ? "" : Match.Mode == GameMode.Grow ? lead.Food.growLevel + " 级 · " + game.FFAKills(lead) + " 杀" : game.FFAKills(lead) + " 杀   ·   先到 " + Match.FFATarget + " 杀获胜", With(normal, 20, TextAnchor.MiddleCenter));
                 Scoreboard(W, H, true);
+                if (ToonAssets.Available) FoodHud.DrawTitles(W, H);
                 if (Button(new Rect(W / 2 - 340, H * .84f, 320, 54), "再来一场")) { game.StartMatch(); overlay = Overlay.HeroSelect; }
                 if (Button(new Rect(W / 2 + 20, H * .84f, 320, 54), "返回主菜单", false)) BackToMenu();
                 return;
             }
-            int winner = game.roundsWon[0] >= Config.RoundsToWin ? 0 : 1;
-            Text(new Rect(0, H * .08f, W, 80), Config.TeamName(winner) + " 赢得比赛", With(huge, 64, TextAnchor.MiddleCenter), Config.TeamColor(winner));
+            int winner = Match.Mode == GameMode.Cook ? (game.roundsWon[0] >= game.roundsWon[1] ? 0 : 1) : game.roundsWon[0] >= Config.RoundsToWin ? 0 : 1;
+            bool draw = Match.Mode == GameMode.Cook && game.roundsWon[0] == game.roundsWon[1];
+            Text(new Rect(0, H * .08f, W, 80), draw ? "平局！" : Config.TeamName(winner) + " 赢得" + (Match.Mode == GameMode.Cook ? "抢食大作战" : "比赛"), With(huge, 64, TextAnchor.MiddleCenter), draw ? Color.white : Config.TeamColor(winner));
+            if (ToonAssets.Available) FoodHud.DrawTitles(W, H);
             Text(new Rect(0, H * .08f + 80, W, 34), "回合比分 " + game.roundsWon[0] + " : " + game.roundsWon[1] + "   ·   试玩记录已导出（CSV）", With(normal, 20, TextAnchor.MiddleCenter));
             Scoreboard(W, H, true);
             if (Button(new Rect(W / 2 - 340, H * .84f, 320, 54), "再来一场")) { game.StartMatch(); overlay = Overlay.HeroSelect; }
@@ -1141,13 +1165,14 @@ namespace NeonSiege
             Fill(new Rect(x + 6, y + 150, 360, 2), new Color(.95f, .75f, .35f, .8f));
             Text(new Rect(x + 6, y + 160, 700, 30), (ToonAssets.Available ? (Match.FFA ? "6 人美食大乱斗  ·  霓城美食街  ·  单机对战 AI" : "3v3 蛋糕爆破  ·  霓城美食街  ·  单机对战 AI") : "3v3 战术爆破  ·  旧港军事封锁区  ·  单机对战 AI"), With(small, 17, TextAnchor.MiddleLeft), new Color(.8f, .85f, .9f));
             float by = H * .5f;
-            if (Button(new Rect(x, by, 340, 58), Match.FFA ? "开始 · 美食大乱斗" : "开始作战")) BeginPlay();
-            // V17：模式切换（重新载入场景）
-            if (Button(new Rect(x, by + 72, 340, 50), Match.FFA ? "切换到 3v3 蛋糕爆破" : "切换到 美食大乱斗（6 人混战）", false)) { Match.FFA = !Match.FFA; BackToMenu(); }
-            if (Button(new Rect(x, by + 134, 340, 50), "操作说明", false)) { returnTo = Overlay.Menu; overlay = Overlay.Help; }
-            if (Button(new Rect(x, by + 196, 340, 50), "设置", false)) { returnTo = Overlay.Menu; overlay = Overlay.Settings; }
-            if (Button(new Rect(x, by + 258, 340, 50), "退出游戏", false)) Application.Quit();
-            Text(new Rect(x, H - 70, W - 2 * x, 26), Match.FFA ? "美食大乱斗  ·  6 人各自为战  ·  阵亡 3 秒后复活  ·  捡起对手掉落的美食枪  ·  先到 " + Match.FFATarget + " 杀获胜" : "先赢 5 回合获胜  ·  攻方安装棱能炸弹，守方阻止或拆除  ·  每回合攻守互换", With(small, 15, TextAnchor.MiddleLeft), new Color(.7f, .75f, .8f));
+            if (Button(new Rect(x, by, 340, 58), "开始 · " + Match.ModeName(Match.Mode))) BeginPlay();
+            // V18：四种模式循环切换（重新载入场景）
+            if (Button(new Rect(x, by + 72, 340, 50), "切换模式（当前：" + Match.ModeName(Match.Mode) + "）", false)) { Match.Mode = (GameMode)(((int)Match.Mode + 1) % 4); BackToMenu(); }
+            if (ToonAssets.Available && Button(new Rect(x, by + 134, 340, 50), "帽子与菜谱图鉴", false)) FoodHud.showCollection = true;
+            if (Button(new Rect(x, by + 196, 340, 50), "操作说明", false)) { returnTo = Overlay.Menu; overlay = Overlay.Help; }
+            if (Button(new Rect(x, by + 258, 340, 50), "设置", false)) { returnTo = Overlay.Menu; overlay = Overlay.Settings; }
+            if (Button(new Rect(x, by + 320, 340, 50), "退出游戏", false)) Application.Quit();
+            Text(new Rect(x, H - 70, W - 2 * x, 26), Match.Mode == GameMode.Cook ? "抢食大作战  ·  3v3  ·  把食材送回自己队的大锅，凑成菜额外加分，也可以去偷对面的锅  ·  先到 " + Match.CookTarget + " 分获胜" : Match.Mode == GameMode.Grow ? "吃货变大  ·  6 人各自为战  ·  吃零食 +1 级，击杀 +2 级，阵亡减半  ·  时间到时最大的人获胜" : Match.FFA ? "美食大乱斗  ·  6 人各自为战  ·  阵亡 3 秒后复活  ·  捡起对手掉落的美食枪  ·  先到 " + Match.FFATarget + " 杀获胜" : "先赢 5 回合获胜  ·  攻方安装棱能炸弹，守方阻止或拆除  ·  每回合攻守互换", With(small, 15, TextAnchor.MiddleLeft), new Color(.7f, .75f, .8f));
             Text(new Rect(x, H - 42, W - 2 * x, 22), "V17  ·  Esc 暂停  ·  设置可调整灵敏度 / 视野 / 音量 / 画质", With(tiny, 13, TextAnchor.MiddleLeft), new Color(.5f, .55f, .6f));
         }
 

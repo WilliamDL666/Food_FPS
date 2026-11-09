@@ -59,7 +59,7 @@ namespace NeonSiege
                 if (target != null && !target.alive) target = null;
                 Objective();
             }
-            if (Time.time >= skillAt) { skillAt = Time.time + .4f; ThinkSkill(visible); TryGrenade(visible); ThinkLean(visible); }
+            if (Time.time >= skillAt) { skillAt = Time.time + .4f; ThinkSkill(visible); TryGrenade(visible); ThinkLean(visible); if (ToonAssets.Available && visible && f.Food.UltReady && Random.value < .4f) f.Food.TryUlt(); }
             if (target != null && visible && Vector3.Distance(target.transform.position, f.transform.position) < 1.7f) f.Melee();
             StuckCheck();
         }
@@ -109,6 +109,7 @@ namespace NeonSiege
 
             // Opportunistic interactions
             if (TryUseInteractables()) return;
+            if (ToonAssets.Available && FoodGoals(pos)) return;   // V18：捡食材 / 送菜 / 偷锅 / 吃零食
 
             if (Match.FFA)   // V17：美食大乱斗 —— 去找最近的对手（偶尔绕路）
             {
@@ -404,6 +405,53 @@ namespace NeonSiege
             dir.y = 0;
             f.botMove = dir.normalized;
             f.botSprint = allowSprint && FlatDist(goal, f.transform.position) > 8f && Time.time - heardAt > 2f;
+        }
+
+        // ---------------------------------------------------------------- V18：美食目标
+        void GoFood(Vector3 g) { MoveAlong(g, true); AimToward(NextCorner(g) + Vector3.up * 1.4f, 240f, false); }
+        static IngredientPickup NearestIngredient(Vector3 pos, float max)
+        {
+            IngredientPickup best = null; float bd = max;
+            foreach (var p in IngredientPickup.Live) { if (p == null) continue; float d = FlatDist(p.transform.position, pos); if (d < bd) { bd = d; best = p; } }
+            return best;
+        }
+        bool FoodGoals(Vector3 pos)
+        {
+            var m = Match.I; var fs = f.Food;
+            if (Match.Mode == GameMode.Cook)
+            {
+                var home = CookPot.Pots[f.team]; var enemyPot = CookPot.Pots[1 - f.team];
+                if (home != null && (fs.ingredients.Count >= 2 || fs.ingredients.Count == 1 && FlatDist(home.transform.position, pos) < 25f)) { GoFood(home.transform.position); return true; }
+                if (fs.CanCarry)
+                {
+                    var ing = NearestIngredient(pos, f.slot == 2 ? 30f : 999f);
+                    if (ing != null) { GoFood(ing.transform.position); return true; }
+                    if (enemyPot != null && m.roundsWon[1 - f.team] > 0)
+                    {
+                        GoFood(enemyPot.transform.position);
+                        if (FlatDist(enemyPot.transform.position, pos) < 2.6f) f.botUse = true;
+                        return true;
+                    }
+                }
+                if (home != null && fs.ingredients.Count > 0) { GoFood(home.transform.position); return true; }
+                return false;
+            }
+            if (Match.Mode == GameMode.Grow)
+            {
+                Snack best = null; float bd = 25f;
+                foreach (var it in Interactable.All) if (it is Snack sn && !sn.Eaten) { float d = FlatDist(sn.transform.position, pos); if (d < bd) { bd = d; best = sn; } }
+                if (best != null && f.hp < Config.MaxHp)
+                {
+                    GoFood(best.transform.position);
+                    if (bd < 1.6f) f.botUse = true;
+                    return true;
+                }
+                if (best != null && f.hp >= Config.MaxHp && bd < 12f) { f.hp = Mathf.Min(f.hp, Config.MaxHp - 1); }   // 变大模式：零食总是可以吃
+            }
+            if (m.BombCarrier == f || m.Planted) return false;
+            foreach (var c in DeliveryCrate.Live) if (c != null && c.Landed && FlatDist(c.transform.position, pos) < 20f) { GoFood(c.transform.position); return true; }
+            if (fs.CanCarry && !fs.Transformed) { var ing = NearestIngredient(pos, 11f); if (ing != null) { GoFood(ing.transform.position); return true; } }
+            return false;
         }
 
         Vector3 NextCorner(Vector3 goal)

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace NeonSiege
@@ -9,6 +10,8 @@ namespace NeonSiege
         public Fighter owner;
         Animator anim;
         Transform gun, body, chest;
+        public Transform Body { get { return body; } }
+        GameObject teamRing, plate; bool vanished; readonly List<Renderer> hiddenOnDeath = new List<Renderer>();
         Vector3 muzzleLocal, foreLocal;
         GunParts parts; Renderer[] bodyRenderers; MaterialPropertyBlock mpb; float flashUntil2; Color teamEmission;
         GameObject bombPack;
@@ -218,7 +221,12 @@ namespace NeonSiege
                 av.flashLight.type = LightType.Point; av.flashLight.range = 5; av.flashLight.intensity = 0; av.flashLight.color = new Color(1f, .8f, .5f);
             }
             av.lastPos = f.transform.position;
+            // V18：脚下一圈队伍颜色的光环，敌我一眼分清
+            av.teamRing = GameObject.CreatePrimitive(PrimitiveType.Quad); av.teamRing.name = "队伍光环"; Destroy(av.teamRing.GetComponent<Collider>());
+            av.teamRing.transform.SetParent(root.transform, false); av.teamRing.transform.localPosition = Vector3.up * .04f; av.teamRing.transform.localRotation = Quaternion.Euler(90, 0, 0); av.teamRing.transform.localScale = Vector3.one * 1.5f;
+            var rr = av.teamRing.GetComponent<Renderer>(); rr.sharedMaterial = ToonAssets.RingMaterial(Config.TeamColor(f.team)); rr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; rr.receiveShadows = false;
             if (!visible) foreach (var r in root.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly;
+            if (!visible) av.teamRing.GetComponent<Renderer>().enabled = false;
             return av;
         }
 
@@ -243,7 +251,7 @@ namespace NeonSiege
             model.transform.localScale = Vector3.one * k;
             model.transform.localPosition = new Vector3(0, -b.min.y * k, 0);
             ToonAssets.Recolor(model, Color.Lerp(team, Color.white, .1f), hero.tint);
-            if (ch == "Character_Bean") ToonAssets.AddHat(model, hero.role);   // V17：豆子角色戴美食帽子
+            if (ch == "Character_Bean") ToonAssets.AddHat(model, hero.role, f.human ? Collection.EquippedHat : null);   // V17：豆子角色戴美食帽子
             var av = model.AddComponent<FighterAvatar>();
             av.owner = f; av.body = root.transform; av.gltf = true; av.toon = true;
             av.anim = model.GetComponentInChildren<Animator>();
@@ -292,7 +300,17 @@ namespace NeonSiege
         void UpdateToon()
         {
             clipPlayer.Tick(Time.deltaTime);
-            if (deathT >= 0) { deathT += Time.deltaTime; return; }
+            if (deathT >= 0)
+            {
+                deathT += Time.deltaTime;
+                if (deathT > .7f && !vanished) Vanish();   // V18：阵亡后"噗"地消失，留下一个盘子
+                return;
+            }
+            var ph = Match.I != null ? Match.I.phase : Phase.Live;
+            bool won = ph == Phase.RoundEnd && owner.team == Match.I.lastRoundWinner || ph == Phase.MatchEnd && (Match.FFA ? Match.I.FFALeader() == owner : owner.team == Match.I.lastRoundWinner);
+            string em = owner.Food != null ? owner.Food.EmoteClip : null;
+            if (won) { clipPlayer.Play(Mathf.Repeat(Time.time + owner.slot, 4f) < 2f ? "Yes" : "Wave", .2f); return; }   // 胜利庆祝
+            if (em != null) { clipPlayer.Play(em, .15f); return; }
             Vector3 v = (owner.transform.position - lastPos) / Mathf.Max(Time.deltaTime, .0001f);
             lastPos = owner.transform.position; v.y = 0;
             if (v.magnitude > 20) v = Vector3.zero;
@@ -448,8 +466,19 @@ namespace NeonSiege
             if (anim != null) anim.speed = .25f;
         }
 
+        void Vanish()
+        {
+            vanished = true; hiddenOnDeath.Clear();
+            foreach (var r in body.GetComponentsInChildren<Renderer>()) if (r.enabled) { r.enabled = false; hiddenOnDeath.Add(r); }
+            FoodFx.KillPop(owner.transform.position + Vector3.up * .6f);
+            var pf = Resources.Load<GameObject>("Toon/Kitchen/Plate");
+            if (pf != null) { plate = Instantiate(pf); foreach (var c in plate.GetComponentsInChildren<Collider>()) Destroy(c); plate.transform.position = Skills.GroundAt(owner.transform.position) + Vector3.up * .02f; plate.transform.localScale = Vector3.one * 1.4f; }
+        }
+
         public void Revive()
         {
+            if (vanished) { foreach (var r in hiddenOnDeath) if (r != null) r.enabled = true; hiddenOnDeath.Clear(); vanished = false; }
+            if (plate != null) Destroy(plate);
             deathT = -1; body.localRotation = Quaternion.identity; body.localPosition = Vector3.zero;
             if (anim != null) anim.speed = 1f;
             if (clipPlayer != null) clipPlayer.Play(fpsRig || toon ? "Idle" : "Idle_Gun", .01f, 1f, true);

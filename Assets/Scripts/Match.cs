@@ -76,9 +76,12 @@ namespace NeonSiege
             I = this;
             Application.targetFrameRate = 120;
             Application.runInBackground = true;
-            autoplay = Arg("-neonMatchTest") || Arg("-neonAutoplay") || Arg("-neonFFATest");
-            if (Arg("-neonFFA") || Arg("-neonFFATest")) FFA = true;
-            if (Arg("-neonTests") || Arg("-neonShots") || Arg("-neonMatchTest")) FFA = false;
+            autoplay = Arg("-neonMatchTest") || Arg("-neonAutoplay") || Arg("-neonFFATest") || Arg("-neonCookTest") || Arg("-neonGrowTest");
+            if (Arg("-neonFFA") || Arg("-neonFFATest")) Mode = GameMode.FFA;
+            if (Arg("-neonCook") || Arg("-neonCookTest")) Mode = GameMode.Cook;
+            if (Arg("-neonGrow") || Arg("-neonGrowTest")) Mode = GameMode.Grow;
+            if (Arg("-neonTests") || Arg("-neonShots") || Arg("-neonMatchTest")) Mode = GameMode.Bomb;
+            CookPot.Clear();
             testMode = Arg("-neonTests") || Arg("-neonShots");
             Interactable.All.Clear();
             arena = new GameObject("霓城 · 旧港夜市街区").AddComponent<Arena>();
@@ -91,8 +94,9 @@ namespace NeonSiege
             CreateTeams();
             ui = gameObject.AddComponent<GameUI>();
             if (Arg("-neonTests")) gameObject.AddComponent<PlaytestRunner>().mode = "tests";
-            else if (Arg("-neonMatchTest") || Arg("-neonFFATest")) gameObject.AddComponent<PlaytestRunner>().mode = "match";
+            else if (Arg("-neonMatchTest") || Arg("-neonFFATest") || Arg("-neonCookTest") || Arg("-neonGrowTest")) gameObject.AddComponent<PlaytestRunner>().mode = "match";
             else if (Arg("-neonShots")) gameObject.AddComponent<PlaytestRunner>().mode = "shots";
+            if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); }
             StartMatch();
         }
 
@@ -104,14 +108,18 @@ namespace NeonSiege
         }
 
         // ------------------------------------------------------------------ V17 第三阶段：美食大乱斗（6 人各自为战）
-        public static bool FFA;
+        public static GameMode Mode = GameMode.Bomb;
+        public static bool FFA { get { return Mode == GameMode.FFA || Mode == GameMode.Grow; } }
+        public static string ModeName(GameMode m) { return m == GameMode.Bomb ? "3v3 蛋糕爆破" : m == GameMode.FFA ? "美食大乱斗" : m == GameMode.Cook ? "抢食大作战" : "吃货变大"; }
+        public const int CookTarget = 20, GrowTarget = 12;
         public const int FFATarget = 15; public const float FFATime = 300f, FFARespawn = 3f;
         readonly Dictionary<Fighter, int> ffaKills = new Dictionary<Fighter, int>(), ffaDeaths = new Dictionary<Fighter, int>();
         readonly Dictionary<Fighter, float> ffaRespawnAt = new Dictionary<Fighter, float>();
         public int FFAKills(Fighter f) { return ffaKills.TryGetValue(f, out int k) ? k : 0; }
         public int FFADeaths(Fighter f) { return ffaDeaths.TryGetValue(f, out int k) ? k : 0; }
         public float FFARespawnIn(Fighter f) { return ffaRespawnAt.TryGetValue(f, out float t) ? t - Time.time : 0; }
-        public Fighter FFALeader() { Fighter best = null; foreach (var f in fighters) if (best == null || FFAKills(f) > FFAKills(best)) best = f; return best; }
+        public int FFAScore(Fighter f) { return Mode == GameMode.Grow ? f.Food.growLevel * 100 + FFAKills(f) : FFAKills(f); }
+        public Fighter FFALeader() { Fighter best = null; foreach (var f in fighters) if (best == null || FFAScore(f) > FFAScore(best)) best = f; return best; }
         static WeaponSpec RandomFoodGun() { var a = Config.Arsenal; return a[UnityEngine.Random.Range(1, a.Length)]; }
 
         static readonly Vector3[] FFASpawns = {
@@ -143,14 +151,47 @@ namespace NeonSiege
             foreach (var f in fighters) if (!f.alive && ffaRespawnAt.TryGetValue(f, out float t) && Time.time >= t) RespawnFFA(f);
             if (roundClock <= 0) { roundClock = 0; EndFFA("时间到"); }
         }
+        // ---- 抢食大作战
+        void CookTick(float dt)
+        {
+            roundClock -= dt;
+            foreach (var f in fighters)
+                if (!f.alive && ffaRespawnAt.TryGetValue(f, out float t) && Time.time >= t)
+                { f.Respawn(arena.SpawnPoint(f.team == 0, f.slot), f.team == 0 ? 90 : -90); f.Equip(f.Hero.weapon); ffaRespawnAt.Remove(f); }
+            if (roundClock <= 0) { roundClock = 0; EndCook("时间到"); }
+        }
+        public void CookScore(int team, int pts, string msg)
+        {
+            if (Mode != GameMode.Cook || phase != Phase.Live) return;
+            roundsWon[team] = Mathf.Max(0, roundsWon[team] + pts);
+            Feed(msg, Config.TeamColor(team));
+            Sfx.Ui(pts > 0 ? "confirmation" : "error", .5f, pts > 0 ? 1.2f : .9f);
+            if (roundsWon[team] >= CookTarget) EndCook(Config.TeamName(team) + " 先做满 " + CookTarget + " 分");
+        }
+        void EndCook(string reason)
+        {
+            if (phase == Phase.MatchEnd) return;
+            int w = roundsWon[0] == roundsWon[1] ? -1 : roundsWon[0] > roundsWon[1] ? 0 : 1;
+            lastRoundWinner = w; lastRoundReason = reason; lastRoundResult = w < 0 ? "平局" : Config.TeamName(w) + " 获胜";
+            foreach (var f in fighters) { f.matchStats.Add(f.stats); f.bombBusy = false; }
+            Feed("抢食大作战结束：" + lastRoundResult + "（" + reason + "）", w < 0 ? Color.white : Config.TeamColor(w));
+            Debug.Log("NEON_COOK_DONE score=" + roundsWon[0] + ":" + roundsWon[1] + " reason=" + reason + " delivered=" + CookDelivered());
+            if (player != null && w == player.team) Collection.AddWin();
+            phase = Phase.MatchEnd;
+            Sfx.Ui(player != null && w == player.team ? "confirmation" : "error", .6f, .8f);
+            if (ui != null) ui.OnMatchEnd();
+        }
+        string CookDelivered() { var sb = new StringBuilder(); foreach (var f in fighters) sb.Append(f.Hero.name).Append(':').Append(f.Food.delivered).Append('/').Append(f.Food.steals).Append(' '); return sb.ToString().Trim(); }
+
         void EndFFA(string reason)
         {
             if (phase == Phase.MatchEnd) return;
             var lead = FFALeader();
+            if (player != null && lead == player) Collection.AddWin();
             lastRoundResult = (lead != null ? lead.Hero.name : "无人") + " 获胜"; lastRoundReason = reason;
             foreach (var f in fighters) { f.matchStats.Add(f.stats); f.bombBusy = false; }
             Feed("美食大乱斗结束：" + lastRoundResult + "（" + reason + "）", lead != null ? Config.TeamColor(lead.team) : Color.white);
-            Debug.Log("NEON_FFA_DONE winner=" + (lead != null ? lead.Hero.name : "-") + " kills=" + (lead != null ? FFAKills(lead) : 0) + " reason=" + reason + " time=" + (FFATime - roundClock).ToString("0") + " table=" + FFATable());
+            Debug.Log("NEON_FFA_DONE mode=" + Mode + " winner=" + (lead != null ? lead.Hero.name : "-") + " kills=" + (lead != null ? FFAKills(lead) : 0) + " level=" + (lead != null ? lead.Food.growLevel : 0) + " reason=" + reason + " time=" + (FFATime - roundClock).ToString("0") + " table=" + FFATable());
             phase = Phase.MatchEnd;
             Sfx.Ui(player != null && lead == player ? "confirmation" : "error", .6f, .8f);
             if (ui != null) ui.OnMatchEnd();
@@ -196,6 +237,7 @@ namespace NeonSiege
         public void StartMatch()
         {
             roundsWon[0] = roundsWon[1] = 0; round = 0; records.Clear(); ffaKills.Clear(); ffaDeaths.Clear(); ffaRespawnAt.Clear();
+            if (ToonAssets.Available) foreach (var f in fighters) f.Food.ResetMatch();
             foreach (var f in fighters) { f.matchStats.Clear(); f.credits = Config.StartCredits; f.lossStreak = 0; f.weapon = null; f.alive = false; }
             NextRound();
         }
@@ -209,11 +251,24 @@ namespace NeonSiege
             {
                 foreach (var f in fighters) { f.alive = false; RespawnFFA(f); }
                 BombCarrier = null; bomb = BombState.Carried;
+                phase = Phase.Prep; phaseTimer = autoplay ? 1f : 4f; roundClock = Mode == GameMode.Grow ? (autoplay ? 120f : 180f) : autoplay ? 150f : FFATime;
+                arena.SetSpawnBarriers(false);
+                current = new RoundRecord { round = round, attackers = 0 };
+                if (ui != null) ui.OnPrep();
+                Feed(Mode == GameMode.Grow ? "吃货变大 · 吃零食和击杀让你变大，时间到时最大的人获胜" : "美食大乱斗 · 6 人各自为战 · 先到 " + FFATarget + " 杀获胜", new Color(1f, .7f, .9f));
+                return;
+            }
+            if (Mode == GameMode.Cook)
+            {
+                // V18：抢食大作战 —— 3v3，有复活，把食材送回自己队的大锅
+                CookPot.Create(0, new Vector3(-60.5f, 0, 0)); CookPot.Create(1, new Vector3(60.5f, 0, 0));
+                foreach (var f in fighters) { f.Respawn(arena.SpawnPoint(f.team == 0, f.slot), f.team == 0 ? 90 : -90); f.Equip(f.Hero.weapon); }
+                BombCarrier = null; bomb = BombState.Carried;
                 phase = Phase.Prep; phaseTimer = autoplay ? 1f : 4f; roundClock = autoplay ? 150f : FFATime;
                 arena.SetSpawnBarriers(false);
                 current = new RoundRecord { round = round, attackers = 0 };
                 if (ui != null) ui.OnPrep();
-                Feed("美食大乱斗 · 6 人各自为战 · 先到 " + FFATarget + " 杀获胜", new Color(1f, .7f, .9f));
+                Feed("抢食大作战 · 把地图上的食材送回自己队的大锅 · 凑成一道菜额外 +1 分 · 先到 " + CookTarget + " 分获胜", new Color(1f, .7f, .9f));
                 return;
             }
             RerollBots();
@@ -313,7 +368,7 @@ namespace NeonSiege
         {
             phase = Phase.Live; liveStartedAt = Time.time;
             arena.SetSpawnBarriers(false);
-            if (FFA) { Feed("开吃！", new Color(1f, .6f, .8f)); Sfx.Ui("bong", .6f); if (ui != null) ui.OnLive(); return; }
+            if (FFA || Mode == GameMode.Cook) { Feed("开吃！", new Color(1f, .6f, .8f)); Sfx.Ui("bong", .6f); if (ui != null) ui.OnLive(); return; }
             current.blueComp = Comp(0); current.redComp = Comp(1);
             Feed("战斗开始！" + Config.TeamName(AttackingTeam) + "需在 A 或 B 点安装棱能炸弹", new Color(1f, .6f, .3f));
             Sfx.Ui("bong", .6f);
@@ -330,6 +385,7 @@ namespace NeonSiege
         void TickLive(float dt)
         {
             if (FFA) { FFATick(dt); return; }
+            if (Mode == GameMode.Cook) { CookTick(dt); return; }
             if (bomb == BombState.Planted)
             {
                 bombTimer -= dt;
@@ -446,11 +502,19 @@ namespace NeonSiege
             if (feed.Count > 7) feed.RemoveAt(0);
             if (FFA)
             {
-                if (killer != null && killer != victim) ffaKills[killer] = FFAKills(killer) + 1;
+                if (killer != null && killer != victim) { ffaKills[killer] = FFAKills(killer) + 1; if (Mode == GameMode.Grow) killer.Food.Grow(2); }
                 ffaDeaths[victim] = FFADeaths(victim) + 1;
                 ffaRespawnAt[victim] = Time.time + FFARespawn;
                 WeaponDrop.Spawn(victim.W, victim.transform.position);
-                if (killer != null && FFAKills(killer) >= FFATarget) EndFFA(killer.Hero.name + " 拿到 " + FFATarget + " 杀");
+                if (Mode == GameMode.FFA && killer != null && FFAKills(killer) >= FFATarget) EndFFA(killer.Hero.name + " 拿到 " + FFATarget + " 杀");
+                if (Mode == GameMode.Grow && killer != null && killer.Food.growLevel >= GrowTarget) EndFFA(killer.Hero.name + " 变到了最大");
+                return;
+            }
+            if (Mode == GameMode.Cook)
+            {
+                if (killer != null && killer != victim) ffaKills[killer] = FFAKills(killer) + 1;
+                ffaDeaths[victim] = FFADeaths(victim) + 1;
+                ffaRespawnAt[victim] = Time.time + 4f;
                 return;
             }
             if (killer != null && killer.team != victim.team && current != null) current.kills[killer.team]++;
@@ -466,7 +530,7 @@ namespace NeonSiege
 
         void CheckElimination()
         {
-            if (phase != Phase.Live || FFA) return;
+            if (phase != Phase.Live || FFA || Mode == GameMode.Cook) return;
             bool attAlive = false, defAlive = false;
             foreach (var f in fighters) if (f.alive) { if (f.team == AttackingTeam) attAlive = true; else defAlive = true; }
             if (!attAlive && !Planted) EndRound(DefendingTeam, "攻方全灭 · 炸弹未安装");
@@ -523,6 +587,7 @@ namespace NeonSiege
         void EndMatch()
         {
             phase = Phase.MatchEnd;
+            if (player != null && roundsWon[player.team] >= Config.RoundsToWin) Collection.AddWin();
             WriteTelemetry();
             if (ui != null) ui.OnMatchEnd();
         }

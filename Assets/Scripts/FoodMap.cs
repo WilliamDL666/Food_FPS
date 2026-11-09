@@ -8,7 +8,8 @@ namespace NeonSiege
     // 能吃的补给：走过去按住 G 吃掉，回 25 生命；吃掉后 25 秒刷新，新回合也会刷新
     public class Snack : Interactable
     {
-        public const float Heal = 25f, Respawn = 25f;
+        public const float Heal = 25f;
+        public static float Respawn { get { return Match.Mode == GameMode.Grow ? 8f : 25f; } }
         Transform model; float eatenAt = -999; bool eaten; Light glow;
         public bool Eaten { get { return eaten; } }
 
@@ -52,7 +53,9 @@ namespace NeonSiege
         protected override void OnStart(Fighter f) { Sfx.Play("food_squish", transform.position, .5f, 1.3f, 1f, 15f); }
         protected override void Complete(Fighter f)
         {
-            f.hp = Mathf.Min(Config.MaxHp, f.hp + Heal);
+            float heal = Heal * (ToonAssets.Available && f.role == Role.Falcon ? 2f : 1f);   // 猎隼被动：吃零食回血翻倍
+            f.hp = Mathf.Min(Config.MaxHp, f.hp + heal);
+            if (ToonAssets.Available) { f.Food.snacks++; f.Food.Grow(1); }
             eatenAt = Time.time; Show(false);
             Fx.Burst(f.Chest, Vector3.up, new Color(1f, .6f, .75f), 18, 2.2f, .06f, .6f, .4f);
             Sfx.Play("food_popcorn", transform.position, .8f, .8f, 1f, 20f);
@@ -66,30 +69,51 @@ namespace NeonSiege
     public static class SauceZone
     {
         public const int None = 0, Chocolate = 1, Butter = 2;
-        struct Z { public Vector3 c; public float rx, rz, rot; public int kind; }
+        class Z { public Vector3 c; public float rx, rz, rot; public int kind; public float hotUntil, slickUntil; }
         static readonly List<Z> zones = new List<Z>();
         public static void Clear() { zones.Clear(); }
         public static void Add(Vector3 c, float rx, float rz, float rotY, int kind) { zones.Add(new Z { c = c, rx = rx, rz = rz, rot = rotY, kind = kind }); }
-        public static int At(Vector3 p)
+        static Z Find(Vector3 p)
         {
-            if (p.y > .35f) return None;
+            if (p.y > .35f) return null;
             foreach (var z in zones)
             {
                 Vector3 d = Quaternion.Euler(0, -z.rot, 0) * (p - z.c);
-                if ((d.x * d.x) / (z.rx * z.rx) + (d.z * d.z) / (z.rz * z.rz) <= 1f) return z.kind;
+                if ((d.x * d.x) / (z.rx * z.rx) + (d.z * d.z) / (z.rz * z.rz) <= 1f) return z;
             }
-            return None;
+            return null;
         }
+        public static int At(Vector3 p) { var z = Find(p); return z == null ? None : z.kind; }
+        // V18：食物反应 —— 黄油被番茄酱弄得更滑；巧克力被辣椒加热变成热巧克力
+        public static void Mark(Vector3 p, float secs, bool hot)
+        {
+            var z = Find(p); if (z == null) return;
+            if (hot) { bool was = Time.time < z.hotUntil; z.hotUntil = Time.time + secs; if (!was && Match.I != null) Match.I.Feed("辣椒 + 巧克力酱 = 热巧克力！踩上去会烫", new Color(1f, .5f, .3f)); }
+            else { bool was = Time.time < z.slickUntil; z.slickUntil = Time.time + secs; if (!was && Match.I != null) Match.I.Feed("番茄酱 + 黄油 = 更滑了！", new Color(1f, .6f, .4f)); }
+        }
+        public static bool HotAt(Vector3 p) { var z = Find(p); return z != null && Time.time < z.hotUntil; }
+        public static bool SlickAt(Vector3 p) { var z = Find(p); return z != null && Time.time < z.slickUntil; }
     }
 
     // 火锅热气：挡住视线（AI 也看不穿），子弹可以穿过
     public static class SteamCloud
     {
         static readonly List<Vector4> clouds = new List<Vector4>();   // xyz 中心, w 半径
-        public static void Clear() { clouds.Clear(); }
+        public static void Clear() { clouds.Clear(); suppressedUntil = 0; particles.Clear(); }
+        static float suppressedUntil; public static readonly List<ParticleSystem> particles = new List<ParticleSystem>();
+        public static bool Suppressed { get { return Time.time < suppressedUntil; } }
+        // V18：冰淇淋给火锅降温，热气散开一段时间
+        public static bool Suppress(float secs)
+        {
+            bool was = Suppressed; suppressedUntil = Time.time + secs;
+            foreach (var ps in particles) if (ps != null) { var em = ps.emission; em.enabled = false; }
+            return !was;
+        }
+        public static void Tick() { if (!Suppressed && suppressedUntil > 0) { suppressedUntil = 0; foreach (var ps in particles) if (ps != null) { var em = ps.emission; em.enabled = true; } } }
         public static void Add(Vector3 c, float r) { clouds.Add(new Vector4(c.x, c.y, c.z, r)); }
         public static bool Blocks(Vector3 a, Vector3 b)
         {
+            Tick(); if (Suppressed) return false;
             foreach (var c in clouds)
             {
                 Vector3 cc = c; Vector3 ab = b - a;
