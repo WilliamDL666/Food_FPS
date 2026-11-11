@@ -464,6 +464,25 @@ namespace NeonSiege
                     bool snackMarked = InteractMarkers.Count >= 7;
                     Check("M18", "能交互的东西有闪光圈和 G 气泡（装饰美食没有）；美食道具被打会抖；楼顶奶油滴边、棉花糖云", snackMarked && jiggles > 10 && frost > 50 && clouds >= 10,
                         "交互标记 " + InteractMarkers.Count + " 个，会抖的美食 " + jiggles + " 个，奶油滴边 " + frost + " 段，云 " + clouds + " 朵");
+                    // Grow mode: a full-health player can use a snack for growth without losing health.
+                    Snack growSnack = null;
+                    foreach (var it in Interactable.All) if (it is Snack sn && !sn.Eaten) { growSnack = sn; break; }
+                    var grower = Other(def, 2);
+                    var previousMode = Match.Mode;
+                    float previousHp = grower.hp, previousArmor = grower.armor;
+                    int previousLevel = grower.Food.growLevel;
+                    Match.Mode = GameMode.Grow;
+                    grower.hp = Config.MaxHp;
+                    bool growUsable = growSnack != null && growSnack.Usable(grower);
+                    bool growConsumed = growUsable && growSnack.Hold(grower, growSnack.holdTime);
+                    bool growCorrect = growConsumed && grower.Food.growLevel == previousLevel + 1 && Mathf.Approximately(grower.hp, Config.MaxHp);
+                    if (growSnack != null) growSnack.ResetRound();
+                    Match.Mode = GameMode.Bomb;
+                    bool ordinaryFullBlocked = growSnack != null && !growSnack.Usable(grower);
+                    Match.Mode = previousMode;
+                    grower.hp = previousHp; grower.armor = previousArmor; grower.Food.growLevel = previousLevel; grower.Food.ApplyGrowScale();
+                    Check("M19", "变大模式满血也能吃零食升级，且不会为了吃零食损失生命；普通模式满血不能吃", growCorrect && ordinaryFullBlocked,
+                        "可交互=" + growUsable + " 已吃掉=" + growConsumed + " 升级且生命不变=" + growCorrect + " 普通模式满血不可吃=" + ordinaryFullBlocked);
                 }
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
