@@ -6,13 +6,15 @@ namespace NeonSiege
     public class Stats
     {
         public int kills, deaths, assists, headshots, shots, hits, skillUses, skillEffective, doorsOpened, coverDestroyed, plants, defuses;
-        public float damage, captureTime;
-        public void Clear() { kills = deaths = assists = headshots = shots = hits = skillUses = skillEffective = doorsOpened = coverDestroyed = plants = defuses = 0; damage = captureTime = 0; }
+        public int chestHits, stomachHits, armHits, legHits, pierced;   // V20：部位命中、穿墙命中
+        public float damage, captureTime, armorDamage;
+        public void Clear() { kills = deaths = assists = headshots = shots = hits = skillUses = skillEffective = doorsOpened = coverDestroyed = plants = defuses = 0; chestHits = stomachHits = armHits = legHits = pierced = 0; damage = captureTime = armorDamage = 0; }
         public void Add(Stats o)
         {
             kills += o.kills; deaths += o.deaths; assists += o.assists; headshots += o.headshots; shots += o.shots; hits += o.hits;
             skillUses += o.skillUses; skillEffective += o.skillEffective; doorsOpened += o.doorsOpened; coverDestroyed += o.coverDestroyed;
             plants += o.plants; defuses += o.defuses; damage += o.damage; captureTime += o.captureTime;
+            chestHits += o.chestHits; stomachHits += o.stomachHits; armHits += o.armHits; legHits += o.legHits; pierced += o.pierced; armorDamage += o.armorDamage;
         }
     }
 
@@ -40,6 +42,7 @@ namespace NeonSiege
         public void Equip(WeaponSpec w)
         {
             weapon = w; ammo = W.magazine; reloadEndAt = 0; bloom = 0; sprayShots = 0;
+            drawUntil = Time.time + W.drawTime;   // V20：拔枪时间
             BuildVisuals();
         }
         public float hp = Config.MaxHp, armor = Config.MaxArmor;
@@ -55,9 +58,26 @@ namespace NeonSiege
         public Vector3 velocity;
         public float revealedUntil, hiddenFromScanUntil, jammedUntil;
         // V18：美食大作战（食材、变身、大招……都在 FoodState 里）
-        public float freezeUntil; FoodState food;
+        public float freezeUntil; FoodState food; bool crouchToggle;
+        // V20：角色 / 枪械 / 3C
+        public int armorClass = 3, helmetClass = 2, armorOverride = -1;
+        public float stamina = 100f; public bool exhausted, prone; public float adsK;
+        float staminaUsedAt, sprintEndedAt = -9, drawUntil, proneChangeUntil, jumpBufferedAt = -9, lastGroundedAt = -9, reloadDuration = 2f; bool wasSprinting;
+        public readonly List<HitRecord> damageLog = new List<HitRecord>();
+        public bool Prone { get { return prone; } }
+        public string MoveStateName { get { return !alive ? "阵亡" : mantling ? "翻越" : Sliding ? "滑铲" : !grounded ? "空中" : prone ? "趴下" : crouching ? "蹲下" : sprinting ? "冲刺" : aiming ? "开镜" : new Vector2(velocity.x, velocity.z).magnitude > .5f ? "行走" : "站立"; } }
+        public bool leanHeadHit(Vector3 p) { return leanHead != null && leanHead.enabled && Vector3.Distance(p, leanHead.transform.position) < leanHead.radius + .05f || headBox != null && headBox.enabled && Vector3.Distance(p, headBox.transform.position) < headBox.radius + .03f && p.y > headBox.transform.position.y - .1f; }
+        public bool CanFireNow { get { return Time.time >= drawUntil && Time.time - sprintEndedAt >= W.sprintToFire && Time.time >= proneChangeUntil && !sprinting; } }
+        public void SetProne(bool on)
+        {
+            if (prone == on) return;
+            if (!on && Physics.SphereCast(transform.position + Vector3.up * .4f, .3f, Vector3.up, out _, 1.4f, ~0, QueryTriggerInteraction.Ignore)) return;   // 头顶没空间站不起来
+            prone = on; proneChangeUntil = Time.time + Tune.ProneTransition;
+            if (on) { crouching = false; cc.height = .7f; cc.center = new Vector3(0, .35f, 0); }
+            else SetHeight(false);
+        }
         public FoodState Food { get { if (food == null) { food = GetComponent<FoodState>() ?? gameObject.AddComponent<FoodState>(); food.f = this; } return food; } }
-        public bool FoodAim { get { return ToonAssets.Available && aiming && aimedAt > 0 && Time.time - aimedAt > .1f; } }
+        public bool FoodAim { get { return ToonAssets.Available && aiming && adsK > .85f; } }
         public void Freeze(float t) { freezeUntil = Mathf.Max(freezeUntil, Time.time + t); }
         public float lastDamageAt; public Vector3 lastDamageFrom; public float lastArmorBreakAt = -10;
         public float hitMarkerUntil; public bool hitMarkerKill, hitMarkerHead; public float armorBreakMarkAt = -10; float fovKick;
@@ -87,12 +107,12 @@ namespace NeonSiege
         public bool Scoped { get { return aiming && W.sight == "scope" && aimedAt > 0 && Time.time - aimedAt > .12f; } }
 
         public bool IsReloading { get { return reloadEndAt > 0; } }
-        public float ReloadProgress { get { return IsReloading ? 1f - (reloadEndAt - Time.time) / W.reload : 0f; } }
+        public float ReloadProgress { get { return IsReloading ? 1f - (reloadEndAt - Time.time) / Mathf.Max(.05f, reloadDuration) : 0f; } }
         public Vector3 Eye { get { return transform.position + Vector3.up * camHeight + LeanOffset; } }
         // V13：Q/E 探头 —— 头和枪向侧面探出 0.38 m 并倾斜 14°，身体留在掩体后
         public float lean; public int botLean;   // -1 左 · 0 · +1 右
         public Vector3 LeanOffset { get { return transform.right * (lean * .38f) + Vector3.down * (Mathf.Abs(lean) * .06f); } }
-        SphereCollider leanHead;
+        SphereCollider leanHead, headBox;
         void UpdateLean(int want)
         {
             if (sprinting || Sliding || mantling || !grounded || bombBusy) want = 0;
@@ -111,9 +131,18 @@ namespace NeonSiege
             }
             leanHead.enabled = Mathf.Abs(lean) > .2f;
             leanHead.transform.localPosition = new Vector3(lean * .38f, camHeight - Mathf.Abs(lean) * .06f, 0);
+            // V20：统一的头部判定球（所有干员一样，和帽子 / 外观无关），跟着姿态上下移动
+            if (headBox == null)
+            {
+                var hb = new GameObject("头部判定"); hb.transform.SetParent(transform, false);
+                headBox = hb.AddComponent<SphereCollider>(); headBox.radius = .2f;
+                Physics.IgnoreCollision(cc, headBox);
+            }
+            headBox.enabled = alive && Mathf.Abs(lean) <= .2f;
+            headBox.transform.localPosition = new Vector3(0, prone ? .52f : crouching ? 1.1f : 1.65f, prone ? .25f : 0f);
         }
-        public Vector3 Chest { get { return transform.position + Vector3.up * (crouching ? .9f : 1.32f); } }
-        public Vector3 Head { get { return transform.position + Vector3.up * (crouching ? 1.15f : 1.72f); } }
+        public Vector3 Chest { get { return transform.position + Vector3.up * (prone ? .4f : crouching ? .9f : 1.32f); } }
+        public Vector3 Head { get { return transform.position + Vector3.up * (prone ? .6f : crouching ? 1.15f : 1.72f); } }
         public Vector3 AimDir { get { return Quaternion.Euler(pitch, yaw, 0) * Vector3.forward; } }
         public bool Dashing { get { return Time.time < dashUntil; } }
         public bool ShieldUp { get { return Time.time < shieldActiveUntil; } }
@@ -226,7 +255,9 @@ namespace NeonSiege
             if (avatar != null) avatar.Revive();
             if (builtFor != W) BuildVisuals();
             if (human) { AttachCamera(); if (viewPivot != null) viewPivot.gameObject.SetActive(true); }
-            SetHeight(false); freezeUntil = 0;
+            prone = false; SetHeight(false); freezeUntil = 0;
+            stamina = Tune.StaminaMax; exhausted = false; adsK = 0; damageLog.Clear(); drawUntil = 0; proneChangeUntil = 0;
+            armorClass = armorOverride >= 0 ? armorOverride : Hero.armorClass; helmetClass = armorOverride >= 0 ? armorOverride : Hero.helmetClass;
             if (ToonAssets.Available) Food.OnRespawn();
         }
 
@@ -262,7 +293,8 @@ namespace NeonSiege
                     mouseSensitivity = GameSettings.Sensitivity;
                     if (Cursor.lockState == CursorLockMode.Locked)
                     {
-                        float adsMul = aiming ? .6f / Mathf.Max(1, W.adsZoom * .7f) * GameSettings.AdsSensitivity : 1f;
+                        // V20：开镜灵敏度按视野换算（屏幕中心手感一致），再乘玩家设置的倍率
+                        float adsMul = adsK > .01f ? Mathf.Lerp(1f, Mathf.Tan(GameSettings.Fov / W.adsZoom * .5f * Mathf.Deg2Rad) / Mathf.Tan(GameSettings.Fov * .5f * Mathf.Deg2Rad) * GameSettings.AdsSensitivity, adsK) : 1f;
                         float my = Input.GetAxis("Mouse Y") * mouseSensitivity * adsMul;
                         yaw += Input.GetAxis("Mouse X") * mouseSensitivity * adsMul;
                         pitch = Mathf.Clamp(pitch - my, -85, 85);
@@ -271,12 +303,14 @@ namespace NeonSiege
                     float x = Input.GetAxisRaw("Horizontal"), z = Input.GetAxisRaw("Vertical");
                     wish = Quaternion.Euler(0, yaw, 0) * new Vector3(x, 0, z);
                     wantSprint = Input.GetKey(KeyCode.LeftShift) && z > .1f;
-                    wantCrouch = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C);
+                    if (Tune.CrouchHold) wantCrouch = Input.GetKey(KeyCode.LeftControl) || Input.GetKey(KeyCode.C);
+                    else { if (Input.GetKeyDown(KeyCode.LeftControl) || Input.GetKeyDown(KeyCode.C)) crouchToggle = !crouchToggle; wantCrouch = crouchToggle; }
+                    if (Input.GetKeyDown(KeyCode.Z) && grounded && !mantling) { SetProne(!prone); crouchToggle = false; }   // V20：Z 趴下 / 起身
                     jump = Input.GetKeyDown(KeyCode.Space);
                     trigger = Input.GetMouseButton(0) && canAct;
                     if (Input.GetMouseButtonDown(1) && !Skills.Previewing(this)) { adsToggle = !adsToggle; if (adsToggle) Sfx.Ui("click", .25f, 1.6f); }
                     if (wantSprint && wish.sqrMagnitude > .1f) adsToggle = false;
-                    ads = adsToggle;
+                    ads = Tune.AdsHold ? Input.GetMouseButton(1) && !Skills.Previewing(this) : adsToggle;
                     use = (Input.GetKey(KeyCode.G) || scriptUse) && canAct;
                     if (Input.GetKeyDown(KeyCode.R)) Reload();
                     UpdateLean((Input.GetKey(KeyCode.E) ? 1 : 0) - (Input.GetKey(KeyCode.Q) ? 1 : 0));
@@ -302,7 +336,9 @@ namespace NeonSiege
             HandleUse(use);
             if (bombBusy || usingInteract != null) { wish = Vector3.zero; trigger = false; }
             transform.rotation = Quaternion.Euler(0, yaw, 0);
-            if (wantCrouch != crouching && grounded && !Dashing)
+            if (prone && (jump || wantSprint && wish.sqrMagnitude > .1f)) { SetProne(false); jump = false; }   // 跳 / 冲刺会起身
+            if (prone) wantCrouch = false;
+            if (wantCrouch != crouching && grounded && !Dashing && !prone)
             {
                 if (wantCrouch || !Physics.SphereCast(transform.position + Vector3.up * .5f, .3f, Vector3.up, out _, 1.2f, ~0, QueryTriggerInteraction.Ignore))
                     SetHeight(wantCrouch);
@@ -313,11 +349,20 @@ namespace NeonSiege
             if (human && !frozen && jump && !mantling && TryMantle()) jump = false;
             if (mantling) { UpdateMantle(); wish = Vector3.zero; trigger = false; jump = false; }
             bool wasAiming = aiming;
-            aiming = ads && !Dashing && !IsReloading && grounded && !bombBusy && !Sliding && !mantling;
+            aiming = ads && !Dashing && !IsReloading && grounded && !bombBusy && !Sliding && !mantling && Time.time >= proneChangeUntil;
             if (aiming && !wasAiming) aimedAt = Time.time;
             if (!aiming) aimedAt = -1;
             if (human && (IsReloading || bombBusy || Dashing)) adsToggle = false;
-            sprinting = wantSprint && !aiming && (!crouching || Sliding) && !trigger && wish.sqrMagnitude > .1f && !ShieldUp && !mantling;
+            sprinting = wantSprint && !aiming && (!crouching || Sliding) && !trigger && wish.sqrMagnitude > .1f && !ShieldUp && !mantling && !prone && !exhausted && stamina > 0;
+            // V20：体力 —— 冲刺消耗，停下一会儿后恢复；耗尽后要恢复到一定值才能再冲刺
+            if (sprinting && !Sliding) { stamina = Mathf.Max(0, stamina - Tune.SprintDrain * Time.deltaTime); staminaUsedAt = Time.time; if (stamina <= 0) exhausted = true; }
+            else if (Time.time - staminaUsedAt > Tune.RegenDelay) stamina = Mathf.Min(Tune.StaminaMax, stamina + Tune.StaminaRegen * Time.deltaTime);
+            if (exhausted && stamina >= Tune.ExhaustRecover) exhausted = false;
+            if (wasSprinting && !sprinting) sprintEndedAt = Time.time;
+            wasSprinting = sprinting;
+            // V20：开镜有时间（受负重影响），散布、视野都按开镜进度过渡
+            float adsT = Mathf.Max(.03f, Ballistics.AdsTime(this));
+            adsK = Mathf.MoveTowards(adsK, aiming ? 1f : 0f, Time.deltaTime / (aiming ? adsT : adsT * .7f));
             Move(wish, jump);
             if (Dashing) trigger = false;
             HandleTrigger(trigger);
@@ -327,9 +372,10 @@ namespace NeonSiege
         void Move(Vector3 wish, bool jump)
         {
             if (Dashing || mantling) return;
-            float speed = sprinting ? Config.SprintSpeed : crouching ? Config.CrouchSpeed : Config.WalkSpeed;
-            if (aiming) speed *= .6f;
-            speed *= W.moveMultiplier;
+            float speed = sprinting ? Config.SprintSpeed : prone ? Tune.ProneSpeed : crouching ? Config.CrouchSpeed : Config.WalkSpeed;
+            if (aiming) speed *= Mathf.Lerp(1f, Tune.AdsMoveMul, adsK);
+            speed *= W.moveMultiplier * Ballistics.WeightSpeedMul(this);
+            if (Time.time < proneChangeUntil) speed *= .2f;
             if (ShieldUp) speed *= Config.ShieldMoveMultiplier;
             if (Time.time < jammedUntil) speed *= Config.NoiseSlow;
             if (Time.time < creamUntil) speed *= .85f;
@@ -340,7 +386,7 @@ namespace NeonSiege
             else if (sauce == SauceZone.Butter) speed *= 1.1f;
             if (Match.I.BombCarrier == this) speed *= .96f;
             Vector3 target = Vector3.ClampMagnitude(wish, 1f) * speed;
-            float accel = grounded ? (sauce == SauceZone.Butter ? (SauceZone.SlickAt(transform.position) ? 2f : 4.5f) : 40f) : 6f;   // 黄油地面打滑
+            float accel = grounded ? (sauce == SauceZone.Butter ? (SauceZone.SlickAt(transform.position) ? 2f : 4.5f) : Tune.Accel) : Tune.AirAccel;   // 黄油地面打滑
             Vector3 planar = new Vector3(velocity.x, 0, velocity.z);
             // 弹射板飞行中保持惯性（不按方向键就不减速），保证能落到高台上
             if (launched && !grounded) { if (wish.sqrMagnitude > .01f) planar = Vector3.MoveTowards(planar, planar + target * .25f, 2f * Time.deltaTime); }
@@ -352,12 +398,16 @@ namespace NeonSiege
                 planar = (slideDir + steer).normalized * Mathf.Lerp(Config.WalkSpeed * .8f, slideSpeed, Mathf.Sqrt(k));
             }
             grounded = cc.isGrounded;
-            if (grounded && verticalSpeed < 0)
+            if (grounded) lastGroundedAt = Time.time;
+            if (jump) jumpBufferedAt = Time.time;   // V20：输入缓冲 + 离地宽限
+            if (grounded && verticalSpeed < 0) verticalSpeed = -2f;
+            bool canJump = (grounded || Time.time - lastGroundedAt < Tune.CoyoteTime) && verticalSpeed <= 0 && !crouching && !prone && !bombBusy && stamina >= Tune.JumpCost * .5f;
+            if (Time.time - jumpBufferedAt < Tune.JumpBuffer && canJump)
             {
-                verticalSpeed = -2f;
-                if (jump && !crouching && !bombBusy) verticalSpeed = 5.6f;
+                verticalSpeed = Tune.JumpSpeed; jumpBufferedAt = -9; lastGroundedAt = -9;
+                stamina = Mathf.Max(0, stamina - Tune.JumpCost); staminaUsedAt = Time.time;
             }
-            verticalSpeed -= 17f * Time.deltaTime;
+            verticalSpeed -= Tune.Gravity * Time.deltaTime;
             velocity = planar + Vector3.up * verticalSpeed;
             var flags = cc.Move(velocity * Time.deltaTime);
             if ((flags & CollisionFlags.Above) != 0 && verticalSpeed > 0) verticalSpeed = 0;
@@ -494,6 +544,7 @@ namespace NeonSiege
             float r = cc.radius * .9f;
             if (Physics.CheckCapsule(dest + Vector3.up * (r + .1f), dest + Vector3.up * (1.8f - r), r, ~0, QueryTriggerInteraction.Ignore)) return false;
             mantling = true; mantleT = 0; mantleFrom = feet; mantleTo = dest;
+            stamina = Mathf.Max(0, stamina - Tune.MantleCost); staminaUsedAt = Time.time;
             cc.enabled = false; velocity = Vector3.zero; verticalSpeed = 0; slideUntil = 0;
             if (human) { Sfx.Play("impactSoft_heavy", feet, .45f, .9f, 0f); punchPitch -= 3f; }
             return true;
@@ -547,7 +598,7 @@ namespace NeonSiege
             bool pressed = held && !triggerWasHeld;
             triggerWasHeld = held;
             if (burstLeft > 0 && Time.time >= nextBurstAt) { FireBullet(); burstLeft--; nextBurstAt = Time.time + W.burstInterval; }
-            if (!held || Time.time < nextShotAt || IsReloading || burstLeft > 0 || Skills.Previewing(this)) return;
+            if (!held || Time.time < nextShotAt || IsReloading || burstLeft > 0 || Skills.Previewing(this) || !CanFireNow) return;
             if (!W.automatic && !pressed) return;
             if (ammo <= 0) { Reload(); if (human) Sfx.Ui("click", .4f, 1.6f); return; }
             nextShotAt = Time.time + W.ShotInterval;
@@ -557,11 +608,12 @@ namespace NeonSiege
 
         public float CurrentSpread()
         {
-            float s = aiming ? Mathf.Lerp(W.hipSpread * .5f, W.adsSpread, ScopeSettle) : W.hipSpread;
+            float s = Mathf.Lerp(W.hipSpread, aiming ? Mathf.Lerp(W.hipSpread * .5f, W.adsSpread, ScopeSettle) : W.adsSpread, adsK);
             float move = new Vector2(velocity.x, velocity.z).magnitude;
             if (move > .6f) s += aiming ? .5f : 1.3f;
             if (!grounded) s += 3f;
-            if (crouching) s *= .75f;
+            if (crouching) s *= Tune.CrouchSpreadMul;
+            if (prone) s *= Tune.ProneSpreadMul;
             if (Time.time < aimRecoveryUntil) s += 3f;
             if (Time.time < jammedUntil) s *= Config.NoiseSpread;
             return s + bloom;
@@ -599,10 +651,14 @@ namespace NeonSiege
             Match.I.NoiseAt(this, transform.position);
             if (human)
             {
-                float ramp = W.automatic ? Mathf.Min(Mathf.Pow(sprayShots / 4f, 2f) + .45f, 2.2f) : 1f;   // first shots stay on target, long sprays climb
+                // V20：固定弹道（可学习）+ 少量随机，姿态和开镜会减小后坐
                 float settle = Mathf.Lerp(1f, .33f, W.sight == "scope" && aiming ? ScopeSettle : 0f);      // a settled scope kicks a third as much
-                float kick = W.recoil * ramp * settle * Random.Range(.8f, 1.2f) * (aiming ? .7f : 1f) * (crouching ? .8f : 1f);
-                pitch -= kick; yaw += Random.Range(-.35f, .35f) * W.recoil;
+                float stanceMul = prone ? Tune.ProneRecoilMul : crouching ? Tune.CrouchRecoilMul : 1f;
+                Vector2 step = Ballistics.RecoilStep(W, sprayShots) * settle * stanceMul * (aiming ? .7f : 1f);
+                float kick = step.y;
+                pitch -= kick; yaw += step.x;
+                if (sprayShots == 1) Range.Spray.Clear();
+                Range.Spray.Add((Range.Spray.Count > 0 ? Range.Spray[Range.Spray.Count - 1] : Vector2.zero) + step);
                 recoilDebt += kick * .6f;   // Apex-style: most of the climb settles back after the spray
                 punchPitch -= kick * .6f;
                 viewKick = Mathf.Min(viewKick + .025f + W.recoil * .015f, .12f); boltKick = 1f;
@@ -635,13 +691,22 @@ namespace NeonSiege
                     Fx.Sparks(h.point, -dir, new Color(1f, .95f, .6f), 8);
                     return true;
                 }
-                float falloff = Falloff(distance, w);
-                bool head = h.point.y >= f.transform.position.y + (f.crouching ? 1.02f : 1.55f);
-                float dmg = w.bodyDamage * falloff * (head ? (w.pellets > 1 ? 1.4f : Config.HeadMultiplier) : 1f);
+                // V20：统一判定（部位只看胶囊体里的相对位置）+ 护甲等级 / 穿透
+                float falloff = Falloff(distance, w) * (Bullet.Current != null ? Bullet.Current.dmgMul : 1f);
+                var part = Ballistics.PartOf(f, h.point); bool head = part == HitPart.Head;
+                Ballistics.Split(w, part, f, falloff, out float hpDmg, out float armorDmg, out int cls);
+                float dmg = hpDmg + armorDmg, before = dmg;
                 if (!FoodState.Incoming(f, this, dir, ref dmg)) return true;   // 幻频甩糖 / 汉堡盾
-                bool armorHit = f.armor > 0;
-                bool killed = f.ReceiveDamage(dmg, this, transform.position, head);
+                if (before > 0) { float r = dmg / before; hpDmg *= r; armorDmg *= r; }
+                bool armorHit = f.armor > 0 && cls > 0;
+                var rec = new HitRecord { attacker = Hero.name, weapon = w.id + "「" + w.name + "」", part = part, hp = hpDmg, armor = Mathf.Min(armorDmg, f.armor), distance = distance, time = Time.time, pen = w.pen, cls = f.armor > 0 ? cls : 0 };
+                f.damageLog.Add(rec); if (f.damageLog.Count > 30) f.damageLog.RemoveAt(0);
+                if (human) Range.LastHit = rec;
+                bool killed = f.ReceiveDamage(hpDmg, this, transform.position, head, false, armorDmg);
                 stats.hits++; if (head) stats.headshots++;
+                if (part == HitPart.Chest) stats.chestHits++; else if (part == HitPart.Stomach) stats.stomachHits++; else if (part == HitPart.Arm) stats.armHits++; else if (part == HitPart.Leg) stats.legHits++;
+                if (Bullet.Current != null && Bullet.Current.dmgMul < 1f) stats.pierced++;
+                stats.armorDamage += rec.armor;
                 FoodState.OnHit(this, f, dmg);
                 if (killed && ToonAssets.Available) { if (human) Collection.AddKill(); else if (Random.value < .35f) Food.Emote("Wave"); }
                 if (ToonAssets.Available && w.id == "BR-5") f.creamUntil = Time.time + .8f;   // 奶油糊在身上：短暂减速
@@ -685,6 +750,21 @@ namespace NeonSiege
                 }
                 return false;
             }
+            // V20：薄墙可以打穿（伤害打折）
+            if (w.wallPen > 0 && h.normal.y < .6f && Bullet.Current != null && Bullet.Current.pierces < 1)
+            {
+                float probe = w.wallPen + .05f;
+                if (Physics.Raycast(h.point + dir * probe, -dir, out RaycastHit exit, probe, ~0, QueryTriggerInteraction.Ignore) && exit.collider == h.collider)
+                {
+                    float thick = probe - exit.distance;
+                    if (thick <= w.wallPen)
+                    {
+                        Bullet.Current.pierces++; Bullet.Current.dmgMul *= Mathf.Lerp(.75f, .45f, thick / Mathf.Max(.01f, w.wallPen));
+                        if (ToonAssets.Available) FoodFx.Impact(h.point, h.normal, w); else Fx.BulletHole(h.point, h.normal, false);
+                        return false;
+                    }
+                }
+            }
             if (ToonAssets.Available) { var jg = h.collider.GetComponentInParent<FoodJiggle>(); if (jg != null) jg.Hit(); FoodReact.OnImpact(this, h, w); FoodFx.Impact(h.point, h.normal, w); return true; }   // V17：墙上地上留下酱汁
             Fx.Sparks(h.point, h.normal, new Color(1f, .75f, .4f), 7);
             Fx.Burst(h.point, h.normal, new Color(.5f, .5f, .52f, .5f), 4, 1.2f, .12f, .6f, .1f, Fx.Smoke);
@@ -707,7 +787,8 @@ namespace NeonSiege
         public void Reload()
         {
             if (IsReloading || ammo >= W.magazine || !alive) return;
-            reloadEndAt = Time.time + W.reload; burstLeft = 0;
+            reloadDuration = ammo > 0 ? W.reloadTac : W.reloadEmpty;   // V20：战术换弹（还有子弹）比空仓换弹快
+            reloadEndAt = Time.time + reloadDuration; burstLeft = 0;
             Sfx.Play(W.pellets > 1 ? "reload_shotgun" : W.id == "SMG-7" || W.id == "P-9" ? "reload_pistol" : W.id == "DMR-3" ? "reload_dmr" : "reload_rifle", transform.position, human ? .6f : .7f, W.reload < 2f ? 1.1f : 1f, human ? 0 : 1, 18f);
             if (human && viewParts != null && viewParts.mag != null)
             {
@@ -727,14 +808,15 @@ namespace NeonSiege
         }
 
         // Armor absorbs damage first (有效生命 150). Returns true if this hit killed.
-        public bool ReceiveDamage(float amount, Fighter source, Vector3 from, bool head, bool explosive = false)
+        public bool ReceiveDamage(float amount, Fighter source, Vector3 from, bool head, bool explosive = false, float armorShare = -1f)
         {
             if (!alive || Match.I.phase != Phase.Live) return false;
             if (Time.time < guardUntil) amount *= 1f - Config.DashDamageReduction;
             if (explosive && ToonAssets.Available && role == Role.Ironwall) amount *= .5f;   // 铁幕被动
             float total = amount;
-            float toArmor = Mathf.Min(armor, amount);
-            armor -= toArmor; amount -= toArmor;
+            float toArmor;
+            if (armorShare >= 0) { toArmor = Mathf.Min(armor, armorShare); armor -= toArmor; }   // V20：子弹 —— 生命 / 护甲的分配已经按穿透算好
+            else { toArmor = Mathf.Min(armor, amount); armor -= toArmor; amount -= toArmor; }
             if (toArmor > 0 && armor <= 0) { lastArmorBreakAt = Time.time; Sfx.Play("impactGlass_heavy", Chest, human ? .5f : .7f, 1.6f, human ? 0 : 1, 25f); }
             float dealt = Mathf.Min(hp, amount) + toArmor;
             hp -= amount;
@@ -786,7 +868,7 @@ namespace NeonSiege
         void UpdateView()
         {
             landDip = Mathf.MoveTowards(landDip, 0, Time.deltaTime * .5f);
-            float eye = (crouching ? 1.08f : 1.62f) - (Sliding ? .12f : 0f) - landDip;
+            float eye = (prone ? .45f : crouching ? 1.08f : 1.62f) - (Sliding ? .12f : 0f) - landDip;
             cam.transform.localPosition = Vector3.Lerp(cam.transform.localPosition, new Vector3(lean * .38f, eye - Mathf.Abs(lean) * .06f, 0), Time.deltaTime * (mantling ? 20f : 14f));
             if (Time.time - lastShotAt > .14f && recoilDebt > 0)
             {
@@ -799,17 +881,17 @@ namespace NeonSiege
             camHeight = cam.transform.localPosition.y;
             punchPitch = Mathf.Lerp(punchPitch, 0, Time.deltaTime * 9f); punchYaw = Mathf.Lerp(punchYaw, 0, Time.deltaTime * 9f);
             Fx.shake = Mathf.MoveTowards(Fx.shake, 0, Time.deltaTime * 1.6f);
-            Vector3 shakeOff = Fx.shake > 0 ? new Vector3(Mathf.PerlinNoise(Time.time * 25, 0) - .5f, Mathf.PerlinNoise(0, Time.time * 25) - .5f, 0) * Fx.shake * 6f : Vector3.zero;
+            Vector3 shakeOff = Fx.shake > 0 ? new Vector3(Mathf.PerlinNoise(Time.time * 25, 0) - .5f, Mathf.PerlinNoise(0, Time.time * 25) - .5f, 0) * Fx.shake * 6f * Tune.ShakeScale : Vector3.zero;
             cam.transform.localRotation = Quaternion.Euler(pitch + punchPitch + shakeOff.y, punchYaw + shakeOff.x, shakeOff.x * .5f + camRoll - lean * 14f);
             float baseFov = GameSettings.Fov;
-            float targetFov = aiming ? baseFov / W.adsZoom : Sliding ? baseFov + 10f : sprinting ? baseFov + 6f : baseFov;
+            float targetFov = adsK > 0 ? Mathf.Lerp(baseFov, baseFov / W.adsZoom, adsK) : Sliding ? baseFov + Tune.SlideFovAdd : sprinting ? baseFov + Tune.SprintFovAdd : baseFov;
             if (Dashing) targetFov = 92f;
             fovKick = Mathf.Lerp(Mathf.Min(fovKick, 4f), 0, Time.deltaTime * 12f);
             cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, Time.deltaTime * 14f) + fovKick * (aiming ? .3f : 1f) * Time.deltaTime * 10f;
             if (viewPivot == null) return;
             float move = new Vector2(velocity.x, velocity.z).magnitude;
             viewBob += Time.deltaTime * move * 1.6f;
-            Vector3 bob = grounded ? new Vector3(Mathf.Sin(viewBob) * .008f, Mathf.Abs(Mathf.Cos(viewBob)) * .01f, 0) * (aiming ? .2f : 1f) * Mathf.Clamp01(move / 5f) : new Vector3(0, -.02f, 0);
+            Vector3 bob = (grounded ? new Vector3(Mathf.Sin(viewBob) * .008f, Mathf.Abs(Mathf.Cos(viewBob)) * .01f, 0) * (aiming ? .2f : 1f) * Mathf.Clamp01(move / 5f) : new Vector3(0, -.02f, 0)) * Tune.BobScale;
             if (Cursor.lockState == CursorLockMode.Locked)
                 viewSway = Vector3.Lerp(viewSway, new Vector3(-Input.GetAxis("Mouse X"), -Input.GetAxis("Mouse Y"), 0) * (aiming ? .002f : .006f), Time.deltaTime * 8f);
             viewKick = Mathf.MoveTowards(viewKick, 0, Time.deltaTime * .5f);

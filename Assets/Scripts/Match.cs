@@ -80,10 +80,12 @@ namespace NeonSiege
             if (Arg("-neonFFA") || Arg("-neonFFATest")) Mode = GameMode.FFA;
             if (Arg("-neonCook") || Arg("-neonCookTest")) Mode = GameMode.Cook;
             if (Arg("-neonGrow") || Arg("-neonGrowTest")) Mode = GameMode.Grow;
+            if (Arg("-neonRange") || Arg("-neonRangeTest")) Mode = GameMode.Range;
             if (Arg("-neonTests") || Arg("-neonShots") || Arg("-neonMatchTest")) Mode = GameMode.Bomb;
             CookPot.Clear();
-            testMode = Arg("-neonTests") || Arg("-neonShots");
+            testMode = Arg("-neonTests") || Arg("-neonShots") || Arg("-neonRangeTest");
             Interactable.All.Clear();
+            DataTables.Load();   // V20：读取 StreamingAssets/Data 里的数值表
             arena = new GameObject("霓城 · 旧港夜市街区").AddComponent<Arena>();
             arena.Build();
             ArenaLightmaps.Apply(arena);   // 编辑器里烘焙好的全局光照
@@ -96,7 +98,9 @@ namespace NeonSiege
             if (Arg("-neonTests")) gameObject.AddComponent<PlaytestRunner>().mode = "tests";
             else if (Arg("-neonMatchTest") || Arg("-neonFFATest") || Arg("-neonCookTest") || Arg("-neonGrowTest")) gameObject.AddComponent<PlaytestRunner>().mode = "match";
             else if (Arg("-neonShots")) gameObject.AddComponent<PlaytestRunner>().mode = "shots";
+            else if (Arg("-neonRangeTest")) gameObject.AddComponent<PlaytestRunner>().mode = "range";
             if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); gameObject.AddComponent<InteractMarkers>(); }
+            gameObject.AddComponent<TuningPanel>(); gameObject.AddComponent<CombatHud>(); gameObject.AddComponent<RangeHud>();
             StartMatch();
         }
 
@@ -110,7 +114,7 @@ namespace NeonSiege
         // ------------------------------------------------------------------ V17 第三阶段：美食大乱斗（6 人各自为战）
         public static GameMode Mode = GameMode.Bomb;
         public static bool FFA { get { return Mode == GameMode.FFA || Mode == GameMode.Grow; } }
-        public static string ModeName(GameMode m) { return m == GameMode.Bomb ? "3v3 蛋糕爆破" : m == GameMode.FFA ? "美食大乱斗" : m == GameMode.Cook ? "抢食大作战" : "吃货变大"; }
+        public static string ModeName(GameMode m) { return m == GameMode.Bomb ? "3v3 蛋糕爆破" : m == GameMode.FFA ? "美食大乱斗" : m == GameMode.Cook ? "抢食大作战" : m == GameMode.Grow ? "吃货变大" : "靶场"; }
         public const int CookTarget = 20, GrowTarget = 12;
         public const int FFATarget = 15; public const float FFATime = 300f, FFARespawn = 3f;
         readonly Dictionary<Fighter, int> ffaKills = new Dictionary<Fighter, int>(), ffaDeaths = new Dictionary<Fighter, int>();
@@ -200,6 +204,15 @@ namespace NeonSiege
 
         void CreateTeams()
         {
+            if (Mode == GameMode.Range)
+            {
+                // V20：靶场 —— 你 + 5 个敌方靶子（不同干员）
+                var all = new List<Role>((Role[])Enum.GetValues(typeof(Role)));
+                Spawn(0, !autoplay, Role.Falcon, 0);
+                int s = 0; foreach (var r in all) if (r != Role.Falcon && s < 5) Spawn(1, false, r, s++);
+                if (player == null) player = fighters[0];
+                return;
+            }
             if (FFA)
             {
                 var all = new List<Role>((Role[])Enum.GetValues(typeof(Role)));
@@ -256,6 +269,17 @@ namespace NeonSiege
                 current = new RoundRecord { round = round, attackers = 0 };
                 if (ui != null) ui.OnPrep();
                 Feed(Mode == GameMode.Grow ? "吃货变大 · 吃零食和击杀让你变大，时间到时最大的人获胜" : "美食大乱斗 · 6 人各自为战 · 先到 " + FFATarget + " 杀获胜", new Color(1f, .7f, .9f));
+                return;
+            }
+            if (Mode == GameMode.Range)
+            {
+                // V20：靶场 —— 5 个不同距离 / 护甲等级的靶子（含移动靶），随时开火
+                BombCarrier = null; bomb = BombState.Carried; arena.SetSpawnBarriers(false);
+                Range.Setup(this);
+                phase = Phase.Live; liveStartedAt = Time.time; roundClock = 99999f;
+                current = new RoundRecord { round = round, attackers = 0 };
+                if (ui != null) ui.OnLive();
+                Feed("靶场 · [ ] 换枪 · T 换护甲等级 · Y 重置靶子 · F1 调参 · F2 判定框", new Color(1f, .8f, .5f));
                 return;
             }
             if (Mode == GameMode.Cook)
@@ -384,6 +408,7 @@ namespace NeonSiege
 
         void TickLive(float dt)
         {
+            if (Mode == GameMode.Range) { Range.Tick(this); return; }
             if (FFA) { FFATick(dt); return; }
             if (Mode == GameMode.Cook) { CookTick(dt); return; }
             if (bomb == BombState.Planted)
@@ -500,6 +525,7 @@ namespace NeonSiege
             string k = killer != null ? killer.Hero.name : "爆炸";
             feed.Add(new FeedItem { text = k + " ▶ " + victim.Hero.name, time = Time.unscaledTime, color = killer != null ? Config.TeamColor(killer.team) : Color.white, kill = true, killer = killer, victim = victim, head = head });
             if (feed.Count > 7) feed.RemoveAt(0);
+            if (Mode == GameMode.Range) { Range.OnKilled(victim); return; }
             if (FFA)
             {
                 if (killer != null && killer != victim) { ffaKills[killer] = FFAKills(killer) + 1; if (Mode == GameMode.Grow) killer.Food.Grow(2); }
@@ -530,7 +556,7 @@ namespace NeonSiege
 
         void CheckElimination()
         {
-            if (phase != Phase.Live || FFA || Mode == GameMode.Cook) return;
+            if (phase != Phase.Live || FFA || Mode == GameMode.Cook || Mode == GameMode.Range) return;
             bool attAlive = false, defAlive = false;
             foreach (var f in fighters) if (f.alive) { if (f.team == AttackingTeam) attAlive = true; else defAlive = true; }
             if (!attAlive && !Planted) EndRound(DefendingTeam, "攻方全灭 · 炸弹未安装");
@@ -667,6 +693,15 @@ namespace NeonSiege
                 sb.AppendLine(string.Join(",", r.round, Config.TeamName(r.attackers), r.winner < 0 ? "draw" : Config.TeamName(r.winner), r.reason, r.duration.ToString("0.0"),
                     r.plantSite, r.plantTime.ToString("0.0"), r.firstContact.ToString("0.0"), r.firstContactZone, r.kills[0], r.kills[1],
                     r.blueComp, r.redComp, "\"" + r.routes + "\"", string.Join("/", r.skillUses), string.Join("/", r.skillEffective)));
+            // V20：每个角色的战斗数据（部位命中分布、护甲伤害、穿墙命中、技能使用 / 有效）
+            sb.AppendLine();
+            sb.AppendLine("fighter,team,weapon,kills,deaths,damage,armor_damage,shots,hits,accuracy,head,chest,stomach,arm,leg,pierced,skill_uses,skill_effective");
+            foreach (var f in fighters)
+            {
+                var st = new Stats(); st.Add(f.matchStats); if (phase != Phase.RoundEnd && phase != Phase.MatchEnd) st.Add(f.stats);
+                sb.AppendLine(string.Join(",", f.Hero.name, Config.TeamName(f.team), f.W.id, st.kills, st.deaths, st.damage.ToString("0"), st.armorDamage.ToString("0"), st.shots, st.hits,
+                    st.shots > 0 ? (st.hits * 100f / st.shots).ToString("0.0") + "%" : "-", st.headshots, st.chestHits, st.stomachHits, st.armHits, st.legHits, st.pierced, st.skillUses, st.skillEffective));
+            }
             string dir = System.IO.Path.Combine(Application.isEditor ? System.IO.Path.GetDirectoryName(Application.dataPath) : Application.persistentDataPath, "Playtest");
             try
             {

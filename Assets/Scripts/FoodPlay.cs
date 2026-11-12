@@ -4,7 +4,7 @@ using UnityEngine;
 namespace NeonSiege
 {
     // ================================================================ V18：美食大作战玩法
-    public enum GameMode { Bomb, FFA, Cook, Grow }
+    public enum GameMode { Bomb, FFA, Cook, Grow, Range }
     public enum FoodForm { None, Cake, MilkTea, Spicy, Burger, IceCream, Onigiri, Dark }
 
     public static class Ingredients
@@ -468,7 +468,7 @@ namespace NeonSiege
         void Update()
         {
             var m = Match.I; if (m == null || !ToonAssets.Available) return;
-            if (m.phase != Phase.Live) { next = Time.time + (Match.Mode == GameMode.Bomb ? 40f : 45f); return; }
+            if (m.phase != Phase.Live || Match.Mode == GameMode.Range) { next = Time.time + (Match.Mode == GameMode.Bomb ? 40f : 45f); return; }
             if (Time.time < next) return;
             next = Time.time + (Match.Mode == GameMode.Bomb ? 999f : 45f);   // 爆破模式每回合一次
             DeliveryCrate.Drop(Spots[Random.Range(0, Spots.Length)]);

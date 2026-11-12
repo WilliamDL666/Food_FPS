@@ -326,9 +326,10 @@ namespace NeonSiege
                 if (speed < 2.5f) clipPlayer.Play(firing ? "Walk_Shoot" : "Walk", .15f, Mathf.Abs(rate) * 1.3f);
                 else clipPlayer.Play(firing ? "Run_Shoot" : "Run_Gun", .15f, Mathf.Abs(rate));
             }
-            else if (owner.crouching) clipPlayer.Play("Duck", .2f);
+            else if (owner.crouching || owner.Prone) clipPlayer.Play("Duck", .2f);
             else clipPlayer.Play("Idle_Shoot", .15f, firing ? 1f : .0001f);   // combat-ready: rifle up, frozen on the aim pose unless firing
-            body.localRotation = Quaternion.Slerp(body.localRotation, Quaternion.Euler(-flinch * 8f, 0, flinch * 4f), Time.deltaTime * 14f);
+            body.localRotation = Quaternion.Slerp(body.localRotation, Quaternion.Euler(owner.Prone ? 72f : -flinch * 8f, 0, flinch * 4f), Time.deltaTime * 10f);
+            body.localPosition = Vector3.Lerp(body.localPosition, owner.Prone ? new Vector3(0, .25f, -.55f) : Vector3.zero, Time.deltaTime * 10f);   // V20：趴下姿态
             flinch = Mathf.MoveTowards(flinch, 0, Time.deltaTime * 5f);
         }
 

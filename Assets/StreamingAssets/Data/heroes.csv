@@ -1,0 +1,7 @@
+﻿role,name,duty,armorClass,helmetClass,skillCooldown,skillCharges
+Falcon,猎隼,突击,3,2,12,2
+Rivet,铆钉,工程,3,3,20,2
+Ironwall,铁幕,防守,4,3,22,1
+Raven,夜鸦,侦查,2,2,22,2
+Ember,焚芯,爆破,3,2,24,2
+Phantom,幻频,干扰,2,3,24,1

@@ -9,7 +9,7 @@ namespace NeonSiege
         enum Overlay { None, Help, HeroSelect, Scoreboard, Map, Menu, Pause, Settings, Buy }
         Overlay overlay = Overlay.Menu;
         Overlay returnTo = Overlay.Menu;   // where Help / Settings go back to
-        public bool Blocking { get { return overlay == Overlay.Help || overlay == Overlay.Menu || overlay == Overlay.Pause || overlay == Overlay.Settings || overlay == Overlay.HeroSelect && Match.I.phase != Phase.Prep; } }
+        public bool Blocking { get { return TuningPanel.Open || overlay == Overlay.Help || overlay == Overlay.Menu || overlay == Overlay.Pause || overlay == Overlay.Settings || overlay == Overlay.HeroSelect && Match.I.phase != Phase.Prep; } }
         Font font;
         GUIStyle tiny, small, normal, large, title, huge, centered, button, wrap;
         Match game;
@@ -362,6 +362,7 @@ namespace NeonSiege
             float cx = W / 2;
             if (Match.FFA) { FFATopBar(W); return; }
             if (Match.Mode == GameMode.Cook) { CookTopBar(W); return; }
+            if (Match.Mode == GameMode.Range) return;   // V20：靶场用右侧的靶场面板
             Rect r = new Rect(cx - 250, 12, 500, 78);
             Round(r, Panel0, 12); Round(r, new Color(.25f, .7f, .9f, .35f), 12, 1.2f);
             Round(new Rect(cx - 250, 12, 120, 78), new Color(Config.Blue.r, Config.Blue.g, Config.Blue.b, .25f), 12);
@@ -1198,7 +1199,7 @@ namespace NeonSiege
             float by = H * .5f;
             if (Button(new Rect(x, by, 340, 58), "开始 · " + Match.ModeName(Match.Mode))) BeginPlay();
             // V18：四种模式循环切换（重新载入场景）
-            if (Button(new Rect(x, by + 72, 340, 50), "切换模式（当前：" + Match.ModeName(Match.Mode) + "）", false)) { Match.Mode = (GameMode)(((int)Match.Mode + 1) % 4); BackToMenu(); }
+            if (Button(new Rect(x, by + 72, 340, 50), "切换模式（当前：" + Match.ModeName(Match.Mode) + "）", false)) { Match.Mode = (GameMode)(((int)Match.Mode + 1) % 5); BackToMenu(); }
             if (ToonAssets.Available && Button(new Rect(x, by + 134, 340, 50), "帽子与菜谱图鉴", false)) FoodHud.showCollection = true;
             if (Button(new Rect(x, by + 196, 340, 50), "操作说明", false)) { returnTo = Overlay.Menu; overlay = Overlay.Help; }
             if (Button(new Rect(x, by + 258, 340, 50), "设置", false)) { returnTo = Overlay.Menu; overlay = Overlay.Settings; }

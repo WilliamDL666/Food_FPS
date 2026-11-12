@@ -22,6 +22,7 @@ namespace NeonSiege
             if (mode == "tests") yield return Tests();
             else if (mode == "match") yield return MatchRun();
             else if (mode == "shots") yield return Shots();
+            else if (mode == "range") yield return RangeRun();
         }
 
         void Check(string id, string desc, bool ok, string detail)
@@ -465,6 +466,47 @@ namespace NeonSiege
                     Check("M18", "能交互的东西有闪光圈和 G 气泡（装饰美食没有）；美食道具被打会抖；楼顶奶油滴边、棉花糖云", snackMarked && jiggles > 10 && frost > 50 && clouds >= 10,
                         "交互标记 " + InteractMarkers.Count + " 个，会抖的美食 " + jiggles + " 个，奶油滴边 " + frost + " 段，云 " + clouds + " 朵");
                 }
+                {
+                    // ---------------- V20：枪械模型（部位 / 护甲穿透 / 固定弹道 / 关键时间）
+                    var v20tgt = Other(def, 0); v20tgt.armor = Config.MaxArmor; Place(v20tgt, new Vector3(-30, .05f, 2), 0); yield return null;
+                    var v20ar = Config.Hero(Role.Rivet).weapon; var v20dmr = Config.Hero(Role.Raven).weapon;
+                    v20tgt.armorClass = 0; v20tgt.helmetClass = 0;
+                    Ballistics.Split(v20ar, HitPart.Head, v20tgt, 1f, out float v20hHead, out _, out _); Ballistics.Split(v20ar, HitPart.Chest, v20tgt, 1f, out float v20hChest, out _, out _); Ballistics.Split(v20ar, HitPart.Leg, v20tgt, 1f, out float v20hLeg, out _, out _);
+                    bool v20parts = v20hHead > v20hChest && v20hChest > v20hLeg;
+                    v20tgt.armorClass = 3; Ballistics.Split(v20dmr, HitPart.Chest, v20tgt, 1f, out float v20penHp, out float v20penArm, out _);   // 穿透 5 ≥ 3 级
+                    var v20smg = Config.Hero(Role.Falcon).weapon; v20tgt.armorClass = 5; Ballistics.Split(v20smg, HitPart.Chest, v20tgt, 1f, out float v20blockHp, out float v20blockArm, out _);   // 穿透 3 < 5 级
+                    bool v20armor = v20penHp / (v20penHp + v20penArm) > v20blockHp / (v20blockHp + v20blockArm) + .3f;
+                    Vector3 v20headPt = v20tgt.transform.position + Vector3.up * 1.8f, v20chestPt = v20tgt.transform.position + Vector3.up * 1.3f, v20legPt = v20tgt.transform.position + Vector3.up * .4f, v20armPt = v20tgt.transform.TransformPoint(new Vector3(.35f, 1.2f, 0));
+                    bool v20zones = Ballistics.PartOf(v20tgt, v20headPt) == HitPart.Head && Ballistics.PartOf(v20tgt, v20chestPt) == HitPart.Chest && Ballistics.PartOf(v20tgt, v20legPt) == HitPart.Leg && Ballistics.PartOf(v20tgt, v20armPt) == HitPart.Arm;
+                    bool v20sameBox = true; foreach (var f in m.fighters) if (f.alive && !f.Prone && !f.crouching && (Mathf.Abs(f.cc.height - 1.92f) > .01f || Mathf.Abs(f.cc.radius - .4f) > .01f)) v20sameBox = false;
+                    bool v20pattern = Ballistics.PatternStep(v20ar, 5) == Ballistics.PatternStep(v20ar, 5) && Ballistics.PatternStep(v20ar, 5) != Ballistics.PatternStep(v20ar, 9);
+                    var v20gunner = Other(att, 1); v20gunner.Equip(v20ar); bool v20drawBlocks = !v20gunner.CanFireNow;
+                    v20gunner.ammo = 5; v20gunner.Reload(); float v20tac = v20gunner.ReloadProgress; yield return new WaitForSeconds(.5f); float v20tacK = v20gunner.ReloadProgress;
+                    v20gunner.Equip(v20ar); v20gunner.ammo = 0; v20gunner.Reload(); yield return new WaitForSeconds(.5f); float v20emptyK = v20gunner.ReloadProgress;
+                    bool v20reloads = v20tacK > v20emptyK + .02f;   // 同样 0.5 秒，战术换弹进度更快
+                    v20gunner.Equip(v20ar); v20tgt.armorClass = Config.Hero(v20tgt.role).armorClass; v20tgt.helmetClass = Config.Hero(v20tgt.role).helmetClass;
+                    Check("M19", "枪械模型：部位倍率（头>胸>腿）、统一判定区（头/胸/臂/腿）、所有角色判定框一致、穿透≥护甲时伤害主要进生命、固定弹道可复现、拔枪期间不能开火、战术换弹比空仓换弹快",
+                        v20parts && v20zones && v20sameBox && v20armor && v20pattern && v20drawBlocks && v20reloads,
+                        "部位=" + v20parts + "（头 " + v20hHead.ToString("0") + " / 胸 " + v20hChest.ToString("0") + " / 腿 " + v20hLeg.ToString("0") + "）判定区=" + v20zones + " 判定框一致=" + v20sameBox + "，穿透 5v3 生命占比 " + (v20penHp / (v20penHp + v20penArm)).ToString("0.00") + " vs 穿透 3v5 " + (v20blockHp / (v20blockHp + v20blockArm)).ToString("0.00") + "，弹道=" + v20pattern + " 拔枪=" + v20drawBlocks + " 换弹 战术 " + v20tacK.ToString("0.00") + " / 空仓 " + v20emptyK.ToString("0.00"));
+
+                    // ---------------- V20：3C（趴下 / 体力 / 开镜时间 / 负重 / 数据表）
+                    var v20mover = Other(def, 2); var v20mb = v20mover.GetComponent<Bot>(); if (v20mb != null) v20mb.enabled = false; Place(v20mover, new Vector3(-40, .05f, 4), 90); yield return null;
+                    v20mover.SetProne(true); bool v20proneOk = v20mover.Prone && v20mover.cc.height < 1f && Ballistics.PartOf(v20mover, v20mover.transform.position + Vector3.up * .65f) == HitPart.Head;
+                    yield return new WaitForSeconds(Tune.ProneTransition + .1f); v20mover.SetProne(false); yield return null;
+                    v20mover.stamina = Tune.StaminaMax; v20mover.exhausted = false;
+                    for (float w = 0; w < 1.5f; w += Time.deltaTime) { v20mover.botMove = Vector3.right; v20mover.botSprint = true; yield return null; }
+                    float v20afterSprint = v20mover.stamina; v20mover.botMove = Vector3.zero; v20mover.botSprint = false;
+                    bool v20staminaOk = v20afterSprint < Tune.StaminaMax - 10f;
+                    v20mover.Equip(Config.Hero(Role.Ironwall).weapon); float v20lmgAds = Ballistics.AdsTime(v20mover); v20mover.Equip(Config.Pistol); float v20pistolAds = Ballistics.AdsTime(v20mover);
+                    bool v20weightOk = v20lmgAds > v20pistolAds * 2f && Ballistics.WeightSpeedMul(v20mover) >= Ballistics.WeightSpeedMul(v20mover);
+                    v20mover.botAim = true; yield return new WaitForSeconds(.08f); float v20k1 = v20mover.adsK; yield return new WaitForSeconds(v20pistolAds + .1f); float v20k2 = v20mover.adsK; v20mover.botAim = false;
+                    bool v20adsOk = v20k1 < .95f && v20k2 > .95f;
+                    bool v20tables = DataTables.LastStatus.StartsWith("已读取") && System.IO.File.Exists(System.IO.Path.Combine(DataTables.Dir, "weapons.csv"));
+                    v20mover.weapon = null; v20mover.BuildVisuals(); v20mover.stamina = Tune.StaminaMax; if (v20mb != null) v20mb.enabled = false;
+                    Check("M20", "3C：趴下（判定框变矮、头部判定跟着变）、冲刺消耗体力、负重越重开镜越慢、开镜需要时间、数值从 CSV 表格读取",
+                        v20proneOk && v20staminaOk && v20weightOk && v20adsOk && v20tables,
+                        "趴下=" + v20proneOk + "，冲刺 1.5 秒后体力 " + v20afterSprint.ToString("0") + "，开镜 LMG " + v20lmgAds.ToString("0.00") + "s / 手枪 " + v20pistolAds.ToString("0.00") + "s，开镜进度 0.08s=" + v20k1.ToString("0.00") + " → " + v20k2.ToString("0.00") + "，数据表=" + v20tables);
+                }
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
 
@@ -649,6 +691,70 @@ namespace NeonSiege
             System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "test_report.md"), report.ToString(), new UTF8Encoding(true));
             Debug.Log("NEON_TESTS_DONE passed=" + passed + " failed=" + failed);
             Application.Quit(failed == 0 ? 0 : 1);
+        }
+
+        // V20：靶场自动测量 —— 每把枪对 25 米 3 级甲靶子打胸 / 打头，记录实际发数和用时，对比理论值；再测穿墙
+        IEnumerator RangeRun()
+        {
+            var m = Match.I; yield return new WaitForSeconds(.5f);
+            var p = m.player; var lane = Range.Lanes[1]; var sb = new System.Text.StringBuilder();
+            var mov = Range.Lanes[4]; mov.moving = false; Place(mov.dummy, Range.Origin + new Vector3(13f, .05f, 20f), 180);   // 移动靶挪开，别挡住 25 米靶的弹道
+            foreach (var w in Config.Arsenal)
+                foreach (var part in new[] { HitPart.Chest, HitPart.Head })
+                {
+                    lane.dummy.Respawn(lane.pos, 180); lane.dummy.armorClass = lane.dummy.helmetClass = 3; lane.dummy.armor = Config.MaxArmor; lane.dummy.damageLog.Clear();
+                    p.Equip(w); yield return new WaitForSeconds(w.drawTime + .05f);
+                    Vector3 from = Range.Origin + new Vector3(lane.pos.x - Range.Origin.x, 1.62f, lane.pos.z - Range.Origin.z - 25f);
+                    Place(p, new Vector3(from.x, .05f, from.z), 0); yield return null;
+                    float t0 = -1; int fired = 0; float lastFire = 0;
+                    while (lane.dummy.alive && fired < 120)
+                    {
+                        Vector3 aim = lane.dummy.transform.position + Vector3.up * (part == HitPart.Head ? 1.75f : 1.32f);
+                        for (int k = 0; k < w.pellets; k++) Bullet.Fire(p, from, from, (aim - from).normalized, Color.white);
+                        fired++; if (t0 < 0) t0 = Time.time; lastFire = Time.time;
+                        float wait = w.burst > 1 && fired % w.burst != 0 ? w.burstInterval : 60f / w.rpm * (w.burst > 1 ? w.burst : 1) - (w.burst > 1 ? w.burstInterval * (w.burst - 1) : 0);
+                        yield return new WaitForSeconds(Mathf.Max(.02f, wait));
+                    }
+                    yield return new WaitForSeconds(.3f);
+                    float actual = lastFire - t0;   // 第一发到击杀那一发之间的时间（和理论 TTK 的定义一致）
+                    float theo = Ballistics.Ttk(w, 3, 3, 25f, part, out int st);
+                    string line = w.id + " " + Ballistics.PartName(part) + " 实际 " + (fired) + " 发 / " + actual.ToString("0.00") + "s · 理论 " + st + " 发 / " + theo.ToString("0.00") + "s · 击杀=" + !lane.dummy.alive;
+                    Debug.Log("NEON_RANGE_RESULT " + line); sb.AppendLine("| " + w.id + " | " + Ballistics.PartName(part) + " | " + fired + " | " + actual.ToString("0.00") + " | " + st + " | " + theo.ToString("0.00") + " |");
+                }
+            // 穿墙：25cm 薄墙后面放一个靶子，AR-9（可穿 30cm）能打到，SMG-7（只能穿 12cm）打不到
+            var tgt = Range.Lanes[0].dummy; Vector3 wallBehind = Range.Origin + new Vector3(-11f, .05f, 21f);
+            bool arThrough = false, smgThrough = false;
+            foreach (var wid in new[] { "AR-9", "SMG-7" })
+            {
+                tgt.Respawn(wallBehind, 180); tgt.armorClass = tgt.helmetClass = 0; tgt.armor = 0; tgt.damageLog.Clear();
+                foreach (var w in Config.Arsenal) if (w.id == wid) p.Equip(w);
+                Vector3 from = Range.Origin + new Vector3(-11f, 1.4f, 12f); Place(p, new Vector3(from.x, .05f, from.z), 0);
+                yield return new WaitForSeconds(.7f);
+                for (int k = 0; k < 3; k++) { Bullet.Fire(p, from, from, (tgt.transform.position + Vector3.up * 1.3f - from).normalized, Color.white); yield return new WaitForSeconds(.15f); }
+                yield return new WaitForSeconds(.3f);
+                bool hit = tgt.damageLog.Count > 0 || tgt.hp < Config.MaxHp;
+                if (wid == "AR-9") arThrough = hit; else smgThrough = hit;
+            }
+            Debug.Log("NEON_RANGE_WALL AR-9穿透=" + arThrough + " SMG-7穿透=" + smgThrough);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Application.dataPath), "range_report.md"),
+                "| 武器 | 部位 | 实际发数 | 实际用时 s | 理论发数 | 理论用时 s |\n| --- | --- | --- | --- | --- | --- |\n" + sb + "\n穿墙：AR-9 打穿 25cm 薄墙=" + arThrough + "，SMG-7=" + smgThrough + "\n");
+            if (!Application.isBatchMode)
+            {
+                // 截图：靶场面板 / F1 调参面板 / F2 判定框
+                string sdir = System.IO.Path.Combine(System.IO.Path.GetDirectoryName(Application.dataPath), "Screenshots"); System.IO.Directory.CreateDirectory(sdir);
+                foreach (var l in Range.Lanes) l.dummy.Respawn(l.pos, 180);
+                foreach (var w in Config.Arsenal) if (w.id == "AR-9") p.Equip(w);
+                Place(p, Range.Origin, 0); p.yaw = 0; p.pitch = 2f; yield return new WaitForSeconds(.8f);
+                var aimT = Range.Lanes[1].dummy.transform.position + Vector3.up * 1.3f;
+                for (int k = 0; k < 4; k++) { Bullet.Fire(p, p.Eye, p.Eye, (aimT - p.Eye).normalized, Color.white); yield return new WaitForSeconds(.1f); }
+                yield return new WaitForSeconds(.4f);
+                yield return Grab(System.IO.Path.Combine(sdir, "26_range.png"));
+                TuningPanel.Open = true; yield return null; yield return Grab(System.IO.Path.Combine(sdir, "27_tuning_panel.png")); TuningPanel.Open = false;
+                TuningPanel.ShowHitboxes = true; Place(p, Range.Origin + new Vector3(-1, 0, 18), 0); yield return new WaitForSeconds(.3f);
+                yield return Grab(System.IO.Path.Combine(sdir, "28_hitboxes.png")); TuningPanel.ShowHitboxes = false;
+            }
+            Debug.Log("NEON_RANGE_DONE");
+            Application.Quit(0);
         }
 
         IEnumerator MatchRun()

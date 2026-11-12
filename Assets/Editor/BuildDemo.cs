@@ -266,6 +266,8 @@ public static class BuildDemo
     {
         string path = "Build/NeonSiegeDemo.exe";
         Directory.CreateDirectory("Build");
+        NeonSiege.DataTables.WriteDefaults("Assets/StreamingAssets/Data");   // V20：默认数值表（打包后可直接改）
+        AssetDatabase.Refresh();
         BuildReport report = BuildPipeline.BuildPlayer(new[] { Scene }, path, BuildTarget.StandaloneWindows64, BuildOptions.None);
         if (report.summary.result != BuildResult.Succeeded) throw new System.Exception("Windows build failed: " + report.summary.result);
         Debug.Log("NEON_BUILD_OK " + path + " " + (report.summary.totalSize / 1048576f).ToString("0.0") + " MB");

@@ -21,6 +21,12 @@ namespace NeonSiege
         public bool laser;
         public string sound; public float soundPitch = 1f;
         public string strengths;
+        // V20：战斗模型
+        public int pen = 3;                                                     // 穿透等级（对比护甲等级）
+        public float headMul = 1.8f, chestMul = 1f, stomachMul = .95f, armMul = .85f, legMul = .75f;   // 部位倍率
+        public float adsTime = .25f, sprintToFire = .2f, reloadTac = 2f, reloadEmpty = 2.5f, drawTime = .5f;   // 关键操作时间
+        public float weight = 3.5f, dropScale = .3f, wallPen = .25f;           // 重量 kg、子弹下坠系数、可穿透墙厚 m
+        public float hDrift = .35f, hRandom = .18f, vRamp = .3f;                // 固定弹道：横摆、随机、上跳递增
 
         public float ShotInterval { get { return 60f / rpm * burst; } }
         public int ShotsToKill { get { return Mathf.CeilToInt((Config.MaxHp + Config.MaxArmor) / (bodyDamage * pellets)); } }
@@ -45,6 +51,7 @@ namespace NeonSiege
 
     public class HeroSpec
     {
+        public int armorClass = 3, helmetClass = 2;   // V20：护甲 / 头盔等级
         public Role role;
         public string name, duty, model;
         public string gltf;                               // V5：带持枪动画的高精度人物（Resources/Models/Chars2）
@@ -63,7 +70,7 @@ namespace NeonSiege
         // 生命 100 + 护甲 50（护甲先扣）：有效生命 150，TTK 约为 GDD 基线的 1.5 倍。
         public const float MaxHp = 100f, MaxArmor = 50f;
         public const float HeadMultiplier = 1.8f;          // 原型假设
-        public const float WalkSpeed = 5.0f, SprintSpeed = 6.8f, CrouchSpeed = 2.7f;
+        public static float WalkSpeed = 5.0f, SprintSpeed = 6.8f, CrouchSpeed = 2.7f;   // V20：可在 F1 面板 / tuning_3c.csv 调
         public const float PointRadius = 4.5f;             // legacy, unused
 
         // 6 主动技能参数（策划假设）

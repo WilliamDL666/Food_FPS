@@ -330,6 +330,7 @@ namespace NeonSiege
     {
         public Fighter owner; public WeaponSpec w; public Vector3 dir; public float speed, traveled, maxRange = 140f; public Color color;
         public Vector3 origin;
+        public float dmgMul = 1f; public int pierces; public static Bullet Current;   // V20：穿墙后伤害打折
         LineRenderer streak; TrailRenderer trail; bool done, flybyPlayed;
 
         public static void Fire(Fighter owner, Vector3 origin, Vector3 visualStart, Vector3 dir, Color color)
@@ -361,6 +362,8 @@ namespace NeonSiege
         void Update()
         {
             if (done) return;
+            // V20：子弹下坠
+            if (w != null && w.dropScale > 0) { Vector3 vel = dir * speed + Vector3.down * 9.81f * w.dropScale * Time.deltaTime; speed = vel.magnitude; dir = vel / speed; }
             float step = speed * Time.deltaTime;
             Vector3 pos = transform.position;
             var hits = Physics.RaycastAll(pos, dir, step, ~0, QueryTriggerInteraction.Ignore);
@@ -368,7 +371,10 @@ namespace NeonSiege
             foreach (var h in hits)
             {
                 if (owner != null && h.collider.transform.IsChildOf(owner.transform)) continue;
-                if (owner != null && owner.Resolve(h, dir, traveled + h.distance, w)) { End(h.point); return; }
+                Current = this;
+                bool stop = owner != null && owner.Resolve(h, dir, traveled + h.distance, w);
+                Current = null;
+                if (stop) { End(h.point); return; }
             }
             traveled += step;
             transform.position = pos + dir * step;
