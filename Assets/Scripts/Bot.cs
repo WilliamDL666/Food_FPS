@@ -424,6 +424,14 @@ namespace NeonSiege
                 if (home != null && (fs.ingredients.Count >= 2 || fs.ingredients.Count == 1 && FlatDist(home.transform.position, pos) < 25f)) { GoFood(home.transform.position); return true; }
                 if (fs.CanCarry)
                 {
+                    // A trailing team's third player contests the enemy pot instead of joining a losing collection race.
+                    if (f.slot == 2 && enemyPot != null && enemyPot.Usable(f) &&
+                        m.roundsWon[1 - f.team] >= 6 && m.roundsWon[1 - f.team] - m.roundsWon[f.team] >= 4)
+                    {
+                        GoFood(enemyPot.transform.position);
+                        if (FlatDist(enemyPot.transform.position, pos) < CookPot.Radius) f.botUse = true;
+                        return true;
+                    }
                     var ing = NearestIngredient(pos, f.slot == 2 ? 30f : 999f);
                     if (ing != null) { GoFood(ing.transform.position); return true; }
                     if (enemyPot != null && m.roundsWon[1 - f.team] > 0)
@@ -440,13 +448,12 @@ namespace NeonSiege
             {
                 Snack best = null; float bd = 25f;
                 foreach (var it in Interactable.All) if (it is Snack sn && !sn.Eaten) { float d = FlatDist(sn.transform.position, pos); if (d < bd) { bd = d; best = sn; } }
-                if (best != null && f.hp < Config.MaxHp)
+                if (best != null && best.Usable(f))
                 {
                     GoFood(best.transform.position);
                     if (bd < 1.6f) f.botUse = true;
                     return true;
                 }
-                if (best != null && f.hp >= Config.MaxHp && bd < 12f) { f.hp = Mathf.Min(f.hp, Config.MaxHp - 1); }   // 变大模式：零食总是可以吃
             }
             if (m.BombCarrier == f || m.Planted) return false;
             foreach (var c in DeliveryCrate.Live) if (c != null && c.Landed && FlatDist(c.transform.position, pos) < 20f) { GoFood(c.transform.position); return true; }

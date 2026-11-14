@@ -47,20 +47,21 @@ namespace NeonSiege
             if (on) Fx.Burst(transform.position + Vector3.up * .4f, Vector3.up, new Color(1f, .8f, .9f), 12, 2f, .05f, .5f, -.2f);
         }
 
-        public override bool Usable(Fighter f) { return !eaten && f.alive && f.hp < Config.MaxHp; }
-        public override string Prompt(Fighter f) { return "按住 G 吃掉（+" + Heal + " 生命）"; }
+        public override bool Usable(Fighter f) { return !eaten && f.alive && (Match.Mode == GameMode.Grow || f.hp < Config.MaxHp); }
+        public override string Prompt(Fighter f) { return Match.Mode == GameMode.Grow ? "按住 G 吃掉（体型 +1 级，受伤时也回血）" : "按住 G 吃掉（+" + Heal + " 生命）"; }
         public override Vector3 Anchor { get { return transform.position + Vector3.up * .5f; } }
         protected override void OnStart(Fighter f) { Sfx.Play("food_squish", transform.position, .5f, 1.3f, 1f, 15f); }
         protected override void Complete(Fighter f)
         {
             float heal = Heal * (ToonAssets.Available && f.role == Role.Falcon ? 2f : 1f);   // 猎隼被动：吃零食回血翻倍
-            f.hp = Mathf.Min(Config.MaxHp, f.hp + heal);
+            float restored = Mathf.Max(0f, Mathf.Min(heal, Config.MaxHp - f.hp));
+            f.hp += restored;
             if (ToonAssets.Available) { f.Food.snacks++; f.Food.Grow(1); }
             eatenAt = Time.time; Show(false);
             Fx.Burst(f.Chest, Vector3.up, new Color(1f, .6f, .75f), 18, 2.2f, .06f, .6f, .4f);
             Sfx.Play("food_popcorn", transform.position, .8f, .8f, 1f, 20f);
             Sfx.Play("confirmation", transform.position, .4f, 1.4f, 1f, 15f);
-            if (f.human) Fx.AddNumber(f.Chest + Vector3.up * .4f, Heal, false, false, false);
+            if (f.human && restored > 0) Fx.AddNumber(f.Chest + Vector3.up * .4f, restored, false, false, false);
         }
         public override void ResetRound() { base.ResetRound(); Show(true); }
     }

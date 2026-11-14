@@ -39,7 +39,7 @@ namespace NeonSiege
             label = null; c = new Color(1f, .7f, .85f); h = 1.6f;
             switch (it)
             {
-                case Snack s: if (s.Eaten) return false; label = "G 吃掉 · +" + Snack.Heal + " 生命"; c = new Color(1f, .6f, .8f); h = 1.45f; return true;
+                case Snack s: if (s.Eaten || p != null && !s.Usable(p)) return false; label = Match.Mode == GameMode.Grow ? "G 吃掉 · 体型 +1 级" : "G 吃掉 · +" + Snack.Heal + " 生命"; c = new Color(1f, .6f, .8f); h = 1.45f; return true;
                 case KitchenStation k:
                     h = 2.45f;
                     label = k.kind == KitchenStation.Kind.HotpotHeal ? "G 涮火锅回血" : k.kind == KitchenStation.Kind.MilkTea ? "G 喝奶茶补弹药" : k.kind == KitchenStation.Kind.Oven ? "G 烤枪 · 伤害 +15%" : "G 拿冰护甲";
