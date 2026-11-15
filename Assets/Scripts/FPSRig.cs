@@ -176,7 +176,7 @@ namespace NeonSiege
             else if (!f.grounded && !f.Mantling) Play("InAir", .2f);
             else if (Time.time < landUntil) Play("LandToStand", .08f, 1.4f);
             else if (Time.time < hitUntil && speed < .5f) Play("HitReaction", .05f, 1.3f);
-            else if (f.sprinting || f.Sliding) Play("Sprint", .15f, Mathf.Clamp(speed / 6.8f, .6f, 1.3f));
+            else if (f.sprinting || f.Sliding || f.SprintRaiseK < 1f - .15f / Mathf.Max(.15f, f.W.sprintToFire)) Play("Sprint", .15f, Mathf.Clamp(speed / 6.8f, .6f, 1.3f));   // V22：冲刺转开火期间保持冲刺姿势，最后 0.15 s 交叉淡回持枪（总时长 = sprintToFire）
             else if (speed > .6f) Play("Run", .15f, Mathf.Clamp(speed / 4.2f, .5f, 1.4f));
             else Play("Idle", .2f);
         }

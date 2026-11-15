@@ -154,6 +154,81 @@ namespace NeonSiege
             }
         }
 
+        // ---- V22：白色豆子姿态剪影（参考图 UI-4）+ 体力锁。和其它图标一样程序生成，不用外部图片
+        static float Ellipse(float x, float y, float cx, float cy, float rx, float ry, float rotDeg = 0)
+        {
+            float a = rotDeg * Mathf.Deg2Rad, dx = x - cx, dy = y - cy;
+            float u = dx * Mathf.Cos(a) + dy * Mathf.Sin(a), v = -dx * Mathf.Sin(a) + dy * Mathf.Cos(a);
+            return (Mathf.Sqrt(u * u / (rx * rx) + v * v / (ry * ry)) - 1f) * Mathf.Min(rx, ry);
+        }
+        static float Smooth(float a, float b, float k) { float h = Mathf.Clamp01(.5f + .5f * (b - a) / k); return Mathf.Lerp(b, a, h) - k * h * (1 - h); }
+        public static Texture2D BeanStand
+        {
+            get
+            {
+                return Paint("bean_stand", 128, (x, y) =>
+                {
+                    float body = Union(Ellipse(x, y, 0, .2f, .4f, .48f), Box(x, y, 0, -.22f, .4f, .3f));
+                    float arms = Union(Ellipse(x, y, -.47f, -.12f, .11f, .2f, 25), Ellipse(x, y, .47f, -.12f, .11f, .2f, -25));
+                    float feet = Union(Ellipse(x, y, -.2f, -.62f, .13f, .16f), Ellipse(x, y, .2f, -.62f, .13f, .16f));
+                    return Smooth(Smooth(body, arms, .06f), feet, .05f);
+                });
+            }
+        }
+        public static Texture2D BeanCrouch
+        {
+            get
+            {
+                return Paint("bean_crouch", 128, (x, y) =>
+                {
+                    float body = Ellipse(x, y, .08f, .1f, .42f, .4f, -15);
+                    float legs = Union(Ellipse(x, y, -.32f, -.38f, .14f, .2f, 30), Ellipse(x, y, .22f, -.42f, .14f, .2f, -20));
+                    float feet = Union(Ellipse(x, y, -.48f, -.62f, .2f, .09f), Ellipse(x, y, .42f, -.62f, .2f, .09f));
+                    float arm = Ellipse(x, y, .5f, -.25f, .1f, .17f, -30);
+                    return Smooth(Smooth(Smooth(body, legs, .07f), feet, .05f), arm, .05f);
+                });
+            }
+        }
+        public static Texture2D BeanProne
+        {
+            get
+            {
+                return Paint("bean_prone", 128, (x, y) =>
+                {
+                    float body = Smooth(Ellipse(x, y, -.05f, -.35f, .58f, .25f), Ellipse(x, y, .12f, -.2f, .36f, .3f), .1f);
+                    float hands = Ellipse(x, y, -.72f, -.46f, .17f, .1f);
+                    float feet = Ellipse(x, y, .74f, -.5f, .17f, .09f);
+                    return Smooth(Smooth(body, hands, .06f), feet, .06f);
+                });
+            }
+        }
+        public static Texture2D BeanSlide
+        {
+            get
+            {
+                return Paint("bean_slide", 128, (x, y) =>
+                {
+                    float body = Smooth(Ellipse(x, y, .02f, -.32f, .52f, .24f, 15), Ellipse(x, y, .38f, -.06f, .3f, .3f), .1f);
+                    float foot = Ellipse(x, y, -.6f, -.52f, .2f, .1f, 10), hand = Ellipse(x, y, .72f, -.4f, .14f, .09f);
+                    float lines = Union(Box(x, y, -.42f, .32f, .26f, .045f), Box(x, y, -.56f, .14f, .2f, .045f));
+                    return Union(Smooth(Smooth(body, foot, .06f), hand, .05f), lines);
+                });
+            }
+        }
+        public static Texture2D Lock
+        {
+            get
+            {
+                return Paint("lock", 64, (x, y) =>
+                {
+                    float shackle = Mathf.Max(Mathf.Abs(Circle(x, y, 0, .18f, .36f)) - .11f, -(y - .12f));
+                    shackle = Union(shackle, Union(Box(x, y, -.36f, .05f, .11f, .14f), Box(x, y, .36f, .05f, .11f, .14f)));
+                    float body = Box(x, y, 0, -.33f, .58f, .42f);
+                    return Cut(Union(shackle, body), Union(Circle(x, y, 0, -.26f, .12f), Box(x, y, 0, -.45f, .05f, .14f)));
+                });
+            }
+        }
+
         public static void Draw(Rect r, Texture2D t, Color c)
         {
             var o = GUI.color; GUI.color = c; GUI.DrawTexture(r, t, ScaleMode.ScaleToFit); GUI.color = o;

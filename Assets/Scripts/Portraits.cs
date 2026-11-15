@@ -10,6 +10,7 @@ namespace NeonSiege
     {
         public static readonly Dictionary<Role, Texture2D> hero = new Dictionary<Role, Texture2D>();
         public static readonly Dictionary<Role, Texture2D> gun = new Dictionary<Role, Texture2D>();
+        public static readonly Dictionary<string, Texture2D> gunById = new Dictionary<string, Texture2D>();   // V22：按枪 id（击杀播报 / 死亡回顾画实际用的枪，含免费手枪）
         public static bool Ready;
 
         public static System.Collections.IEnumerator Build()
@@ -72,9 +73,25 @@ namespace NeonSiege
                 camGo.transform.localPosition = new Vector3(0, 1.02f, -2.6f); camGo.transform.LookAt(g.position + Vector3.forward * .25f);
                 cam.fieldOfView = 20;
                 yield return null;
-                gun[h.role] = Snap(cam, 320, 120);
+                gun[h.role] = Snap(cam, 320, 120); gunById[h.weapon.id] = gun[h.role];
                 Object.Destroy(g.gameObject);
                 cam.fieldOfView = 26;
+            }
+            if (!gunById.ContainsKey(Config.Pistol.id))
+            {
+                bool fpsP = FPSAssets.Available && !ToonAssets.Available;
+                Transform pg = null;
+                if (fpsP) { var go = FPSAssets.Spawn(FPSAssets.WeaponModel(Config.Pistol, false)); if (go != null) { pg = go.transform; var wa = go.GetComponent<Animator>(); if (wa) wa.enabled = false; } }
+                else pg = GunModel.Create(Config.Pistol, out _, Color.white, false);
+                if (pg != null)
+                {
+                    pg.SetParent(studio.transform, false); pg.localPosition = new Vector3(0, 1, 0); pg.localRotation = Quaternion.Euler(0, 90, 0);
+                    rim.color = Color.white; cam.fieldOfView = 16;
+                    camGo.transform.localPosition = new Vector3(0, 1.02f, -2.6f); camGo.transform.LookAt(pg.position + Vector3.forward * .15f);
+                    yield return null;
+                    gunById[Config.Pistol.id] = Snap(cam, 320, 120);
+                    Object.Destroy(pg.gameObject);
+                }
             }
             Object.Destroy(studio);
             Ready = true;

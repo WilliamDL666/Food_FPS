@@ -9,6 +9,7 @@ namespace NeonSiege
         public static float Sensitivity = 2f, AdsSensitivity = 1f, Fov = 78f, Volume = .9f;
         public static int Quality = 2;   // 0 低 · 1 中 · 2 高
         public static bool DamageNumbers = true;
+        public static bool Tips = true;   // V21：首次提示卡（新手提示），默认开启，可在设置里关掉
         public static float EnemyOutline = 1f;
         static bool loaded;
 
@@ -22,13 +23,14 @@ namespace NeonSiege
             Quality = PlayerPrefs.GetInt("ns_quality", 2);
             DamageNumbers = PlayerPrefs.GetInt("ns_dmgnum", 1) == 1;
             EnemyOutline = PlayerPrefs.GetFloat("ns_outline", 1f);
+            Tips = PlayerPrefs.GetInt("ns_tips", 1) == 1;
         }
 
         public static void Save()
         {
             PlayerPrefs.SetFloat("ns_sens", Sensitivity); PlayerPrefs.SetFloat("ns_ads", AdsSensitivity);
             PlayerPrefs.SetFloat("ns_fov", Fov); PlayerPrefs.SetFloat("ns_vol", Volume);
-            PlayerPrefs.SetInt("ns_quality", Quality); PlayerPrefs.SetInt("ns_dmgnum", DamageNumbers ? 1 : 0); PlayerPrefs.SetFloat("ns_outline", EnemyOutline);
+            PlayerPrefs.SetInt("ns_quality", Quality); PlayerPrefs.SetInt("ns_dmgnum", DamageNumbers ? 1 : 0); PlayerPrefs.SetFloat("ns_outline", EnemyOutline); PlayerPrefs.SetInt("ns_tips", Tips ? 1 : 0);
             PlayerPrefs.Save();
             Apply();
         }
@@ -36,7 +38,9 @@ namespace NeonSiege
         public static void Apply()
         {
             Load();
-            AudioListener.volume = Volume;
+            // V21：自动测试 / 自动对局 / 截图（命令行带 -neon 参数）一律静音，不打扰用户
+            bool automated = System.Array.Exists(System.Environment.GetCommandLineArgs(), a => a.StartsWith("-neon"));
+            AudioListener.volume = automated ? 0f : Volume;
             QualitySettings.shadows = Quality == 0 ? ShadowQuality.HardOnly : ShadowQuality.All;
             QualitySettings.shadowDistance = Quality == 0 ? 40 : Quality == 1 ? 60 : 80;
             QualitySettings.shadowResolution = Quality == 0 ? ShadowResolution.Medium : Quality == 1 ? ShadowResolution.High : ShadowResolution.VeryHigh;

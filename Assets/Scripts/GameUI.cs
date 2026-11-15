@@ -59,6 +59,29 @@ namespace NeonSiege
         }
 
         public bool HasChineseFont { get { return font != null && font.HasCharacter('霓') && font.HasCharacter('核'); } }
+        public string OverlayName { get { return overlay.ToString(); } }
+        public int crossDrawn;   // 截图诊断用：准星本帧是否被调用
+        public bool HudOverlayOpen { get { return overlay != Overlay.None && overlay != Overlay.Menu; } }   // V22：菜单 / 地图 / 计分板打开时状态带不画
+
+        // ---- V22 第一期：准星与被施放文案的显示判断（静态，PlaytestRunner M31 / M32 / M34 直接调用）
+        // 冲刺中 0.2；等待中（CanFireNow 为假）0.3 → 0.5 随进度上升；就绪那一帧跳到 0.95 —— "准星收拢、变实 = 能开枪"
+        public static float CrossAlpha(Fighter p) { return p.sprinting ? .2f : !p.CanFireNow ? .3f + .2f * p.FireReadyK : .95f; }
+        public static float CrossGapExtra(Fighter p) { return p.sprinting ? 6f : !p.CanFireNow ? 6f * (1f - p.FireReadyK) : 0f; }   // 等待中准星散开 6 px，按进度收拢
+        // 美食模式开镜：adsK 0.6 → 0.85 之间腰射准星淡出、美食准镜淡入，两者之和恒为 1，开镜全程屏幕中心都有准星
+        public static float FoodReticleK(Fighter p) { return ToonAssets.Available ? Mathf.Clamp01((p.adsK - .6f) / .25f) : 0f; }
+        public static float HipCrossK(Fighter p)
+        {
+            if (ToonAssets.Available) return 1f - FoodReticleK(p);
+            if (p.W.sight == "none") return 1f;
+            return p.W.sight == "scope" ? (p.aiming ? 0f : 1f - p.adsK) : 1f - p.adsK;   // 写实：红点 / 全息随枪模举起淡出
+        }
+        public static string RevealText(Fighter p)
+        {
+            string t = p.RevealedByFireOnly ? "身处燃烧区 · 位置暴露" : "⚠ 你的位置已被侦测，敌方可透墙看到你";
+            return ToonAssets.FoodText(t);
+        }
+        public static string JamText(Fighter p) { return ToonAssets.FoodText("▓ 信号干扰中 ▓"); }
+        public static string FeedWeaponLabel(FeedItem it) { return it.gun != null ? it.gun.id : it.cause; }
         public void Toast(string t) { toast = t; toastUntil = Time.unscaledTime + 2.2f; }
 
         void ShowCursor(bool on) { Cursor.lockState = on ? CursorLockMode.None : CursorLockMode.Locked; Cursor.visible = on; }
@@ -69,11 +92,19 @@ namespace NeonSiege
             if (overlay == Overlay.HeroSelect || overlay == Overlay.Buy) Close();
             var p = game.player; if (p == null) return;
             bool att = p.team == game.AttackingTeam;
-            Banner(att ? "进攻" : "防守", att ? (game.BombCarrier == p ? "你携带着棱能炸弹 · 前往 A 或 B 点安装" : "掩护队友在 A 或 B 点安装棱能炸弹") : "阻止安装 · 若已安装，在引爆前拆除", att ? new Color(1f, .5f, .2f) : new Color(.3f, .7f, 1f));
+            // V21：开局横幅按模式写（以前大乱斗 / 抢食 / 变大也显示"进攻 / 防守"）
+            FoodGuide.ModeBanner(Match.Mode, att, game.BombCarrier == p, out string bt, out string bs);
+            Banner(bt, bs, Match.Mode != GameMode.Bomb ? new Color(1f, .6f, .85f) : att ? new Color(1f, .5f, .2f) : new Color(.3f, .7f, 1f));
         }
+        public string BannerText { get { return banner + " · " + bannerSub; } }
+        public void ClearBanner() { bannerUntil = 0; }   // 截图脚本用：清掉上一张图残留的开局横幅
+        public int helpTab;   // V21：H 帮助页页签 0 操作 · 1 菜谱 · 2 地图美食 · 3 我的英雄
+        public static float HowToMinutes = 3f; public static int HowToRounds = 2;
+        public bool ShowHowTo { get { return game.phase == Phase.Live && (Match.Mode == GameMode.Bomb ? game.round <= HowToRounds : Time.time - game.liveStartedAt < HowToMinutes * 60f); } }
         public void OnRoundEnd() { }
         public void OnMatchEnd() { overlay = Overlay.None; ShowCursor(true); }
         void Banner(string t, string sub, Color c) { t = ToonAssets.FoodText(t); sub = ToonAssets.FoodText(sub); banner = t; bannerSub = sub; bannerColor = c; bannerUntil = Time.unscaledTime + 3.5f; }
+        public void UltBanner(string t, string sub, Color c) { Banner(t, sub, c); }   // V22 第三期：敌方大招预警横幅
         void Close() { overlay = Overlay.None; ShowCursor(false); Sfx.Ui("click", .4f); Time.timeScale = 1; }
         void Pause() { overlay = Overlay.Pause; ShowCursor(true); Time.timeScale = 0; Sfx.Ui("click", .4f, .8f); }
         void Resume() { Close(); }
@@ -205,7 +236,7 @@ namespace NeonSiege
             {
                 float a = i / (float)segs * 360f;
                 Color cc = i / (float)segs <= k ? col : new Color(1, 1, 1, .15f);
-                GUIUtility.RotateAroundPivot(a, c);
+                CombatHud.RotP(a, c);
                 Fill(new Rect(c.x - thick / 2, c.y - radius, thick, radius * .18f), cc);
                 GUI.matrix = m;
             }
@@ -272,9 +303,9 @@ namespace NeonSiege
             if (p.Revealed)
             {
                 // you have been scanned: red pulsing frame + warning
-                float ra = .35f + .25f * Mathf.Sin(Time.time * 9f);
-                var o = GUI.color; GUI.color = new Color(1f, .1f, .12f, ra); GUI.DrawTexture(new Rect(0, 0, W, H), vignette); GUI.color = o;
-                Shadowed(new Rect(W / 2 - 200, 130, 400, 28), "⚠ 你的位置已被侦测，敌方可透墙看到你", With(normal, 18, TextAnchor.MiddleCenter), new Color(1f, .4f, .4f));
+                float ra = .35f + .25f * Mathf.Sin(Time.time * 9f); bool fire = p.RevealedByFireOnly;   // V22：火里暴露用橙色、独立文案
+                var o = GUI.color; GUI.color = fire ? new Color(1f, .45f, .1f, ra * .7f) : new Color(1f, .1f, .12f, ra); GUI.DrawTexture(new Rect(0, 0, W, H), vignette); GUI.color = o;
+                Shadowed(new Rect(W / 2 - 240, 130, 480, 28), RevealText(p), With(normal, 18, TextAnchor.MiddleCenter), fire ? new Color(1f, .7f, .35f) : new Color(1f, .4f, .4f));
             }
             float hurt = Mathf.Clamp01(1f - (Time.time - p.lastDamageAt) / .6f);
             float low = p.hp < 35 ? (.35f + .25f * Mathf.Sin(Time.time * 7f)) * (1 - p.hp / 35f) : 0;
@@ -288,7 +319,7 @@ namespace NeonSiege
                     float y = Random.value * H, hh = Random.Range(2f, 14f);
                     Fill(new Rect(Random.Range(-40, 40), y, W, hh), new Color(Random.value < .5f ? .9f : .2f, .2f, 1f, .08f));
                 }
-                Text(new Rect(W / 2 - 200, 140, 400, 26), "▓ 信号干扰中 ▓", With(centered, 18, TextAnchor.MiddleCenter), new Color(.85f, .45f, 1f, .8f));
+                Text(new Rect(W / 2 - 240, 160, 480, 26), JamText(p), With(centered, 18, TextAnchor.MiddleCenter), new Color(.85f, .45f, 1f, .8f));
             }
             if (p.Dashing)
             {
@@ -296,7 +327,7 @@ namespace NeonSiege
                 for (int i = 0; i < 26; i++)
                 {
                     float ang = i * 360f / 26 + Random.Range(-4f, 4f);
-                    GUIUtility.RotateAroundPivot(ang, new Vector2(W / 2, H / 2));
+                    CombatHud.RotP(ang, new Vector2(W / 2, H / 2));
                     Fill(new Rect(W / 2 - 1, H / 2 - H * .62f, 2, H * Random.Range(.12f, .22f)), new Color(.6f, .85f, 1f, .35f));
                     GUI.matrix = m;
                 }
@@ -409,7 +440,9 @@ namespace NeonSiege
             {
                 for (int i = 0; i < 96 * 54; i++) { float v = Random.value; noise.SetPixel(i % 96, i / 96, new Color(v * .6f, v * .3f, v * .8f, 1)); }
                 noise.Apply(); GUI.DrawTexture(inner, noise);
-                Text(inner, "信号噪幕 · 小地图失效", With(centered, 16, TextAnchor.MiddleCenter));
+                // V21：按干扰来源显示
+                string jam = !ToonAssets.Available ? "信号噪幕 · 小地图失效" : NoiseField.Covers(p) ? "棉花糖迷雾 · 小地图被糖糊住了" : "看不清 · 小地图被糊住了";
+                Text(inner, jam, With(centered, 16, TextAnchor.MiddleCenter));
                 return;
             }
             Round(inner, new Color(.24f, .28f, .32f, .92f), 6);   // V13：可走区域浅色，楼房深色，一眼看出道路
@@ -450,12 +483,13 @@ namespace NeonSiege
                 Vector2 a = map(f.transform.position);
                 Color col = f == p ? Color.white : Config.TeamColor(f.team);
                 var m = GUI.matrix;
-                GUIUtility.RotateAroundPivot(f.yaw, a * GUI.matrix.lossyScale.x / GUI.matrix.lossyScale.x);
+                CombatHud.RotP(f.yaw, a);
                 Fill(new Rect(a.x - 1, a.y - 9, 2, 6), col);
                 GUI.matrix = m;
                 Round(new Rect(a.x - 4, a.y - 4, 8, 8), col, 4);
                 if (game.BombCarrier == f && f.team == p.team) Round(new Rect(a.x + 3, a.y - 7, 5, 5), new Color(1f, .4f, .2f), 2);
             }
+            LinkHud.MapDraw(map, big);   // V22 第三期：自己英雄的联动点（金色星形）+ 队友标记
             Text(new Rect(r.x + 10, r.yMax - 22, r.width - 20, 18), big ? "霓城 · 旧港夜市街区 · M 关闭地图" : "霓城 · 旧港夜市街区 · M 大地图", tiny);
         }
 
@@ -495,7 +529,7 @@ namespace NeonSiege
             {
                 var a = map(sp.pos); Color c = sp.kind == 0 ? CSniper : sp.kind == 1 ? CDefend : sp.kind == 3 ? CGate : CPlant;
                 float sz = (sp.kind == 2 ? 9 : 7.5f) * s;
-                var mat = GUI.matrix; GUIUtility.RotateAroundPivot(45, a);
+                var mat = GUI.matrix; CombatHud.RotP(45, a);
                 Fill(new Rect(a.x - sz / 2, a.y - sz / 2, sz, sz), new Color(0, 0, 0, .75f)); Fill(new Rect(a.x - sz / 2 + 1, a.y - sz / 2 + 1, sz - 2, sz - 2), c);
                 GUI.matrix = mat;
                 if (big) Shadowed(new Rect(a.x - 70, a.y + sz * .6f, 140, 16), sp.label, With(tiny, 11, TextAnchor.MiddleCenter), c);
@@ -550,11 +584,12 @@ namespace NeonSiege
 
         void Crosshair(float W, float H, Fighter p)
         {
-            if (overlay != Overlay.None) return;
+            crossDrawn++;
+            if (overlay != Overlay.None && overlay != Overlay.Menu) return;   // Menu 只在开始前出现；测试 / 截图模式下它会残留，不应挡住准星
             float cx = W / 2, cy = H / 2;
             float spread = p.CurrentSpread();
-            float gap = 4 + Mathf.Tan(spread * Mathf.Deg2Rad) * (H / 2) / Mathf.Tan(p.cam.fieldOfView * .5f * Mathf.Deg2Rad);
-            Color c = new Color(.9f, 1f, 1f, p.sprinting ? .2f : .95f);
+            float gap = 4 + Mathf.Tan(spread * Mathf.Deg2Rad) * (H / 2) / Mathf.Tan(p.cam.fieldOfView * .5f * Mathf.Deg2Rad) + CrossGapExtra(p);
+            Color c = new Color(.9f, 1f, 1f, CrossAlpha(p));   // V22：冲刺转开火 / 拔枪 / 趴下切换期间半透明并散开，就绪那一帧收拢变实
             // AssaultCube-style teammate warning: crosshair turns green over a friendly
             if (Physics.Raycast(p.cam.transform.position, p.cam.transform.forward, out RaycastHit fh, 80f, ~0, QueryTriggerInteraction.Ignore))
             {
@@ -563,18 +598,32 @@ namespace NeonSiege
                 { c = new Color(.35f, 1f, .45f, .95f); Shadowed(new Rect(cx - 60, cy + 18, 120, 20), "友军 · " + mate.Hero.name, With(small, 13, TextAnchor.MiddleCenter), c); }
             }
             bool scoped = p.Scoped;
-            if (ToonAssets.Available && p.aiming) { }   // V18：开镜时由 FoodHud 画美食准镜
-            else if (scoped) ScopeView(W, H, p);
-            else if (p.aiming && p.W.sight == "scope") Fill(new Rect(0, 0, W, H), new Color(0, 0, 0, .6f));   // brief blackout while the optic comes up
-            else if (!p.aiming || p.W.sight == "none")
+            float hipK = HipCrossK(p);   // V22：开镜过程中腰射准星按 adsK 淡出（美食模式和美食准镜交叉淡入，见 FoodHud）
+            if (!ToonAssets.Available && scoped) { ScopeView(W, H, p); hipK = 0; }
+            else if (!ToonAssets.Available && p.aiming && p.W.sight == "scope") Fill(new Rect(0, 0, W, H), new Color(0, 0, 0, .6f));   // brief blackout while the optic comes up
+            if (hipK > .01f && ToonAssets.Available)
             {
-                Color sh = new Color(0, 0, 0, .5f);
+                // V22 打磨：美食模式粉色粗准星（参考图 UI-3）：四段圆角短条 + 中心点，深色描边；透明度 / 收拢沿用 CrossAlpha / CrossGapExtra
+                bool friend = c.r < .5f;   // 瞄到队友时上面已经把颜色换成绿色
+                Color pc = friend ? new Color(.35f, 1f, .45f, c.a * hipK) : new Color(1f, .42f, .62f, c.a * hipK), ol = new Color(.28f, .04f, .14f, .8f * c.a * hipK);
+                float L = 14, T = 5, g = gap + 2;
+                Rect[] seg = { new Rect(cx - T / 2, cy - g - L, T, L), new Rect(cx - T / 2, cy + g, T, L), new Rect(cx - g - L, cy - T / 2, L, T), new Rect(cx + g, cy - T / 2, L, T) };
+                foreach (var sr in seg) Round(new Rect(sr.x - 1.5f, sr.y - 1.5f, sr.width + 3, sr.height + 3), ol, 4);
+                foreach (var sr in seg) Round(sr, pc, 2.5f);
+                Round(new Rect(cx - 4.5f, cy - 4.5f, 9, 9), ol, 4.5f); Round(new Rect(cx - 3, cy - 3, 6, 6), pc, 3);
+            }
+            else if (hipK > .01f)
+            {
+                c.a *= hipK;
+                Color sh = new Color(0, 0, 0, .5f * hipK);
                 Fill(new Rect(cx - 1.5f, cy - gap - 10.5f, 3, 11), sh); Fill(new Rect(cx - 1.5f, cy + gap - .5f, 3, 11), sh);
                 Fill(new Rect(cx - gap - 10.5f, cy - 1.5f, 11, 3), sh); Fill(new Rect(cx + gap - .5f, cy - 1.5f, 11, 3), sh);
                 Fill(new Rect(cx - 1, cy - gap - 10, 2, 10), c); Fill(new Rect(cx - 1, cy + gap, 2, 10), c);
                 Fill(new Rect(cx - gap - 10, cy - 1, 10, 2), c); Fill(new Rect(cx + gap, cy - 1, 10, 2), c);
                 Fill(new Rect(cx - 1, cy - 1, 2, 2), c);
             }
+            float sw = (Time.time - p.swallowedAt) / .15f;   // V22：等待中按开火被吞 → 准星中心闪一个灰点（不出声）
+            if (sw >= 0 && sw < 1) { float d = Mathf.Lerp(12, 8, sw); Round(new Rect(cx - d / 2 - 1, cy - d / 2 - 1, d + 2, d + 2), new Color(.15f, .15f, .18f, .7f * (1 - sw)), d / 2 + 1); Round(new Rect(cx - d / 2, cy - d / 2, d, d), new Color(.62f, .62f, .68f, .97f * (1 - sw)), d / 2); }
             if (Time.time < p.hitMarkerUntil)
             {
                 Color hc = p.hitMarkerKill ? new Color(1f, .2f, .2f) : p.hitMarkerHead ? new Color(1f, .85f, .2f) : Color.white;
@@ -583,7 +632,7 @@ namespace NeonSiege
                 var m = GUI.matrix;
                 for (int i = 0; i < 4; i++)
                 {
-                    GUIUtility.RotateAroundPivot(45 + i * 90, new Vector2(cx, cy));
+                    CombatHud.RotP(45 + i * 90, new Vector2(cx, cy));
                     Fill(new Rect(cx + 7 * punch, cy - 1.5f, size, 3), hc);
                     GUI.matrix = m;
                 }
@@ -598,6 +647,7 @@ namespace NeonSiege
                 Shadowed(new Rect(cx - 80, cy + 30, 160, 22), "护甲击碎", With(centered, 15, TextAnchor.MiddleCenter), bc);
             }
             if (p.IsReloading) Ring(new Vector2(cx, cy), 26, p.ReloadProgress, new Color(.4f, 1f, .9f), 3);
+            else if (p.ProneChangeK < 1f) Ring(new Vector2(cx, cy), 26, p.ProneChangeK, new Color(1f, .85f, .55f), 3);   // V22：趴下 / 起身 0.45 s 不能开火，用同一个环表示
             if (Skills.Previewing(p)) Text(new Rect(cx - 200, cy + 44, 400, 26), "松开 F 施放 · 右键取消", With(small, 15, TextAnchor.MiddleCenter));
             if (Time.time < p.killBannerUntil) KillEmblem(W, H, p);
             if (Time.unscaledTime - skillFlashAt < .7f)
@@ -633,9 +683,12 @@ namespace NeonSiege
 
         void SkillIcon(Rect r, Fighter p, bool ready)
         {
-            Icons.Draw(r, Icons.HexFill, ready ? new Color(p.Hero.tint.r * .35f, p.Hero.tint.g * .35f, p.Hero.tint.b * .35f, .95f) : new Color(.12f, .14f, .17f, .95f));
-            Icons.Draw(r, Icons.HexRing, ready ? p.Hero.tint : new Color(.35f, .38f, .42f));
-            Icons.Draw(new Rect(r.x + r.width * .22f, r.y + r.height * .22f, r.width * .56f, r.height * .56f), Icons.Skill(p.role), ready ? Color.white : new Color(.5f, .55f, .6f));
+            // V22 第三期：瞄着能联动的地图元素时技能图标变金色（只有能联动的英雄会出现）
+            bool link = ready && LinkHud.Aim.any && LinkHud.Aim.ok;
+            if (link) { float g = 4f + 2f * Mathf.Sin(Time.time * 7f); Icons.Draw(new Rect(r.x - g, r.y - g, r.width + g * 2, r.height + g * 2), Icons.HexRing, new Color(Links.Gold.r, Links.Gold.g, Links.Gold.b, .55f)); }
+            Icons.Draw(r, Icons.HexFill, link ? new Color(.45f, .3f, .05f, .95f) : ready ? new Color(p.Hero.tint.r * .35f, p.Hero.tint.g * .35f, p.Hero.tint.b * .35f, .95f) : new Color(.12f, .14f, .17f, .95f));
+            Icons.Draw(r, Icons.HexRing, link ? Links.Gold : ready ? p.Hero.tint : new Color(.35f, .38f, .42f));
+            Icons.Draw(new Rect(r.x + r.width * .22f, r.y + r.height * .22f, r.width * .56f, r.height * .56f), Icons.Skill(p.role), link ? new Color(1f, .95f, .75f) : ready ? Color.white : new Color(.5f, .55f, .6f));
         }
 
         void ZonePopup(float W)
@@ -715,7 +768,7 @@ namespace NeonSiege
             Vector3 to = p.lastDamageFrom - p.transform.position; to.y = 0;
             float ang = Vector3.SignedAngle(Quaternion.Euler(0, p.yaw, 0) * Vector3.forward, to, Vector3.up);
             var m = GUI.matrix;
-            GUIUtility.RotateAroundPivot(ang, new Vector2(W / 2, H / 2));
+            CombatHud.RotP(ang, new Vector2(W / 2, H / 2));
             Round(new Rect(W / 2 - 60, H / 2 - 170, 120, 12), new Color(1f, .15f, .1f, .9f * a), 6);
             Round(new Rect(W / 2 - 25, H / 2 - 186, 50, 10), new Color(1f, .15f, .1f, .6f * a), 5);
             GUI.matrix = m;
@@ -737,9 +790,15 @@ namespace NeonSiege
             {
                 var near = Interactable.Nearest(p);
                 if (near != null) { label = near.Prompt(p); k = near.user == p ? near.progress / near.holdTime : 0; }
+                else if (ToonAssets.Available)
+                {
+                    // V21 规则甲：凑不成菜的第二样食材要按住 G 才捡
+                    var ip = IngredientPickup.HoldTarget(p);
+                    if (ip != null) { label = "按住 G 硬捡（和你的" + Ingredients.Name(p.Food.ingredients[0]) + "凑不成 → 黑暗料理）"; k = ip.HoldProgress(p); col = new Color(.7f, .7f, .75f); }
+                }
             }
             if (label == null) return;
-            Vector2 c = new Vector2(W / 2, H / 2 + 92);
+            Vector2 c = new Vector2(W / 2, H / 2 + 132);   // V22：下移，给准星下方的状态带（+62 ~ +110）让位
             if (k > 0) Ring(c, 30, k, col, 4);
             Round(new Rect(c.x - 15, c.y - 15, 30, 30), new Color(.05f, .08f, .12f, .85f), 6);
             Text(new Rect(c.x - 15, c.y - 15, 30, 30), "G", With(centered, 17, TextAnchor.MiddleCenter), col);   // V18：交互键是 G
@@ -787,6 +846,13 @@ namespace NeonSiege
                 float k = i < p.skillCharges ? 1 : (i == p.skillCharges && p.skillRechargeAt > 0 ? 1 - Mathf.Clamp01((p.skillRechargeAt - Time.time) / p.Hero.skill.cooldown) : 0);
                 if (k > 0) Round(new Rect(pip.x, pip.y, pip.width * k, pip.height), i < p.skillCharges ? p.Hero.tint : new Color(p.Hero.tint.r, p.Hero.tint.g, p.Hero.tint.b, .45f), 4);
             }
+            // V21：前 2 回合（爆破）/ 前 3 分钟（其他模式）在技能条右边显示怎么用，学会了就收起来
+            if (ShowHowTo)
+            {
+                string how = "F 怎么用：" + p.Hero.skill.HowTo;
+                Round(new Rect(444, H - 46, how.Length * 15 + 24, 28), new Color(.03f, .05f, .09f, .7f), 8);
+                Text(new Rect(456, H - 46, how.Length * 15 + 12, 28), how, With(small, 14, TextAnchor.MiddleLeft), new Color(.85f, .95f, 1f));
+            }
         }
 
         void BottomRight(float W, float H, Fighter p)
@@ -831,8 +897,15 @@ namespace NeonSiege
                     Color kc = it.killer != null ? Config.TeamColor(it.killer.team) : Color.white, vc = Config.TeamColor(it.victim.team);
                     if (it.killer != null && Portraits.hero.TryGetValue(it.killer.role, out var kt) && kt != null) { var o = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.DrawTextureWithTexCoords(new Rect(r.x + 4, y + 2, 26, 26), kt, new Rect(.25f, .62f, .5f, .35f)); GUI.color = o; }
                     Text(new Rect(r.x + 34, y, 70, 30), killer, With(small, 14, TextAnchor.MiddleLeft), new Color(kc.r, kc.g, kc.b, a));
-                    if (it.killer != null && Portraits.gun.TryGetValue(it.killer.role, out var gt) && gt != null) { var o = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.DrawTexture(new Rect(r.x + 102, y + 1, 84, 28), gt, ScaleMode.ScaleToFit); GUI.color = o; }
-                    else Icons.Draw(new Rect(r.x + 130, y + 4, 22, 22), Icons.Skill(Role.Ember), new Color(1f, .5f, .2f, a));
+                    // V22：画致命一击实际用的枪；技能 / 手雷 / 大招 / 环境画图标 + 名字（以前画的是击杀者的招牌枪）
+                    var gt = it.gun != null ? GunIcon(it.gun, true) : null;
+                    if (gt != null) { var o = GUI.color; GUI.color = new Color(1, 1, 1, a); GUI.DrawTexture(new Rect(r.x + 102, y + 1, 84, 28), gt, ScaleMode.ScaleToFit); GUI.color = o; }
+                    else if (it.gun != null) Text(new Rect(r.x + 102, y, 84, 30), it.gun.id, With(tiny, 12, TextAnchor.MiddleCenter), new Color(1f, .9f, .8f, a));
+                    else
+                    {
+                        Icons.Draw(new Rect(r.x + 102, y + 4, 22, 22), CombatHud.CauseIcon(it.kind, it.killer), it.kind == DamageKind.Ult ? new Color(1f, .8f, .3f, a) : new Color(1f, .5f, .2f, a));
+                        Text(new Rect(r.x + 125, y, 64, 30), it.cause, With(tiny, 11, TextAnchor.MiddleLeft), new Color(1f, .85f, .7f, a));
+                    }
                     if (it.head) Icons.Draw(new Rect(r.x + 190, y + 5, 20, 20), Icons.Headshot, new Color(1f, .85f, .2f, a));
                     Icons.Draw(new Rect(r.x + 214, y + 6, 18, 18), Icons.Skull, new Color(1f, .35f, .35f, a));
                     Text(new Rect(r.x + 236, y, 90, 30), it.victim.Hero.name, With(small, 14, TextAnchor.MiddleRight), new Color(vc.r, vc.g, vc.b, a));
@@ -884,7 +957,8 @@ namespace NeonSiege
             else if (game.phase == Phase.Prep && overlay == Overlay.None && game.player != null)
             {
                 bool att = game.player.team == game.AttackingTeam;
-                Shadowed(new Rect(W / 2 - 360, H * .2f, 720, 40), (att ? "本回合你是进攻方" : "本回合你是防守方") + " · 准备 " + Mathf.CeilToInt(game.phaseTimer) + " 秒（B 选英雄）", With(centered, 24, TextAnchor.MiddleCenter), att ? new Color(1f, .6f, .3f) : new Color(.4f, .8f, 1f));
+                string who = Match.Mode == GameMode.Bomb ? (att ? "本回合你是进攻方" : "本回合你是防守方") : Match.ModeName(Match.Mode);   // V21：非爆破模式不写攻守
+                Shadowed(new Rect(W / 2 - 360, H * .2f, 720, 40), who + " · 准备 " + Mathf.CeilToInt(game.phaseTimer) + " 秒（B 选英雄）", With(centered, 24, TextAnchor.MiddleCenter), att ? new Color(1f, .6f, .3f) : new Color(.4f, .8f, 1f));
             }
             if (Time.unscaledTime < bannerUntil && game.phase == Phase.Live)
             {
@@ -942,17 +1016,35 @@ namespace NeonSiege
                 : Match.Mode == GameMode.FFA ? "6 人各自为战：阵亡 3 秒后复活并随机拿一把美食枪，阵亡会掉落手里的枪。先到 15 杀获胜。"
                 : "攻方带着生日蛋糕，在 A 或 B 点按住 G 放下蛋糕点蜡烛（4 秒），40 秒后蛋糕爆炸即获胜；守方阻止，或按住 G 吹灭蜡烛（6 秒）。回合内不复活，每回合攻守互换，先赢 5 回合获胜。";
             GUI.Label(new Rect(x + 36, y + 96, pw - 72, 56), rule, wrap);
-            Fill(new Rect(x + 34, y + 160, pw - 68, 1), new Color(.6f, .35f, .55f));
-            Text(new Rect(x + 36, y + 170, 400, 34), "操作", large);
-            string[] keys = { "WASD 移动 · 鼠标瞄准 · 左键开火", "右键 开镜（显示美食准镜）", "Shift 冲刺 · Ctrl/C 蹲下（冲刺中滑铲）", "Space 跳跃 / 翻上美食方块", "Q / E 左右探头 · R 换弹",
-                "4 汽水罐手雷（按住瞄准）· V 平底锅", "F 技能 · X 大招 · 1/2/3 表情", "G（按住）交互 · B 买枪 · Tab 数据", "M 大地图 · H 帮助 · Esc 暂停" };
-            for (int i = 0; i < keys.Length; i++) Text(new Rect(x + 36, y + 210 + i * 30, pw * .46f, 28), keys[i], With(small, 15, TextAnchor.MiddleLeft));
-            Text(new Rect(x + pw * .5f, y + 170, 400, 34), "地图上的美食", large);
-            string[] map = { "闪光圈 + 头顶「G」气泡 = 可以交互", "零食：按住 G 吃掉，+25 生命", "火锅回血炉：涮一涮回血，热气会暴露你", "奶茶机补弹药 · 烤箱伤害 +15% · 冰柜冰护甲", "食材：走过去捡，两样凑成一道菜就变身",
-                "外卖箱：无人机空投，抢到直接变身", "曼妥思可乐：用汽水手雷炸它会喷泉", "果冻弹床弹你上高处 · 传菜转盘会转", "巧克力酱减速 · 黄油打滑", "蛋糕墙能打穿，奶油能把它补回来" };
-            for (int i = 0; i < map.Length; i++) Text(new Rect(x + pw * .5f, y + 210 + i * 28, pw * .47f, 26), map[i], With(small, 14, TextAnchor.MiddleLeft));
+            // V21：页签（操作 / 菜谱 / 地图美食 / 我的英雄），局内随时能开
+            string[] tabs = { "操作", "菜谱", "地图美食", "我的英雄" };
+            for (int i = 0; i < tabs.Length; i++)
+                if (Button(new Rect(x + 36 + i * 168, y + 158, 160, 38), tabs[i], helpTab == i)) helpTab = i;
+            if (Event.current.type == EventType.KeyDown && (Event.current.keyCode == KeyCode.RightArrow || Event.current.keyCode == KeyCode.LeftArrow))
+                helpTab = (helpTab + (Event.current.keyCode == KeyCode.RightArrow ? 1 : 3)) % 4;
+            Fill(new Rect(x + 34, y + 202, pw - 68, 1), new Color(.6f, .35f, .55f));
+            float cy = y + 212;
+            if (helpTab == 1) HelpRecipes(x, cy, pw);
+            else if (helpTab == 2) HelpMapFood(x, cy, pw);
+            else if (helpTab == 3) HelpHero(x, cy, pw);
+            else
+            {
+                string[] keys = { "WASD 移动 · 鼠标瞄准 · 左键开火", "右键 开镜（显示美食准镜）", "Shift 冲刺 · Ctrl/C 蹲下（冲刺中滑铲）", "Space 跳跃 / 翻上美食方块", "Q / E 左右探头 · R 换弹",
+                    "4 汽水罐手雷（按住瞄准）· V 平底锅", "F 技能 · X 大招 · 1/2/3 表情", "G（按住）交互 · B 买枪 · Tab 数据", "M 大地图 · H 帮助 · Esc 暂停" };
+                for (int i = 0; i < keys.Length; i++) Text(new Rect(x + 36, cy + i * 30, pw * .46f, 28), keys[i], With(small, 15, TextAnchor.MiddleLeft));
+                Text(new Rect(x + pw * .5f, cy - 4, 300, 34), "新手提示卡", large);
+                if (Button(new Rect(x + pw * .5f + 170, cy - 2, 90, 32), "开", GameSettings.Tips)) { GameSettings.Tips = true; if (!game.testMode && !game.autoplay) GameSettings.Save(); }
+                if (Button(new Rect(x + pw * .5f + 266, cy - 2, 90, 32), "关", !GameSettings.Tips)) { GameSettings.Tips = false; if (!game.testMode && !game.autoplay) GameSettings.Save(); }
+                Text(new Rect(x + pw * .5f, cy + 36, pw * .46f, 24), "提示记录（本次看过的提示）", With(small, 14, TextAnchor.MiddleLeft), new Color(1f, .85f, .6f));
+                if (FoodTips.Log.Count == 0) Text(new Rect(x + pw * .5f, cy + 62, pw * .46f, 24), "还没有弹过提示", With(tiny, 13, TextAnchor.MiddleLeft));
+                for (int i = 0; i < Mathf.Min(8, FoodTips.Log.Count); i++)
+                {
+                    string t = FoodTips.Log[FoodTips.Log.Count - 1 - i]; if (t.Length > 34) t = t.Substring(0, 33) + "…";
+                    Text(new Rect(x + pw * .5f, cy + 62 + i * 24, pw * .47f, 24), t, With(tiny, 13, TextAnchor.MiddleLeft));
+                }
+            }
             Fill(new Rect(x + 34, y + ph - 120, pw - 68, 1), new Color(.6f, .35f, .55f));
-            Text(new Rect(x + 36, y + ph - 112, pw - 72, 26), "生命 100 + 护甲 50 · 子弹有飞行时间 · 主菜单里有帽子与菜谱图鉴", With(small, 14, TextAnchor.MiddleLeft), new Color(.85f, .8f, .9f));
+            Text(new Rect(x + 36, y + ph - 112, pw - 72, 26), "生命 100 + 护甲 50 · 子弹有飞行时间 · ← → 切换页签 · 主菜单里有帽子与菜谱图鉴", With(small, 14, TextAnchor.MiddleLeft), new Color(.85f, .8f, .9f));
             if (Button(new Rect(x + pw / 2 - 160, y + ph - 74, 320, 52), !started ? "返回主菜单" : returnTo == Overlay.Pause ? "返回" : "继续游戏"))
             {
                 if (!started) overlay = Overlay.Menu;
@@ -961,6 +1053,56 @@ namespace NeonSiege
             }
         }
 
+        void HelpRecipes(float x, float y, float pw)
+        {
+            for (int i = 0; i < Ingredients.Forms.Length; i++)
+            {
+                var fm = Ingredients.Forms[i]; bool d = Collection.Discovered(fm);
+                Rect r = new Rect(x + 36, y + i * 52, pw - 72, 48);
+                Round(r, d ? new Color(.3f, .12f, .25f, .9f) : new Color(.16f, .12f, .18f, .9f), 6);
+                Fill(new Rect(r.x, r.y, 6, r.height), Ingredients.FormColor(fm));
+                Text(new Rect(r.x + 16, r.y + 2, 520, 26), Ingredients.FormName(fm) + "  =  " + Ingredients.FormRecipe(fm), With(normal, 17, TextAnchor.MiddleLeft), Ingredients.FormColor(fm));
+                Text(new Rect(r.x + 16, r.y + 24, r.width - 200, 22), Ingredients.FormEffect(fm) + " · " + Ingredients.FormTime(fm).ToString("0") + " 秒", With(tiny, 13, TextAnchor.MiddleLeft), new Color(.9f, .88f, .92f));
+                Text(new Rect(r.xMax - 170, r.y, 160, 48), d ? "★ 已做过" : "还没做过", With(small, 14, TextAnchor.MiddleRight), d ? new Color(1f, .85f, .35f) : new Color(.6f, .6f, .65f));
+            }
+        }
+        void HelpMapFood(float x, float y, float pw)
+        {
+            string[] map = { "闪光圈 + 头顶「G」气泡 = 可以交互，灰色 = 现在用不了", "零食：按住 G 吃掉，+25 生命（猎隼 +50；变大模式 +1 级）", "火锅回血炉：每秒 +10，最多 60，冷却 30 秒；热气暴露你",
+                "奶茶机补弹药（冷却 40 秒）· 烤箱伤害 +15%（20 秒）", "冰柜：+50 冰护甲，稍微变慢（冷却 60 秒）", "食材：两样凑成一道菜就变身；凑不成的要按住 G 才捡",
+                "外卖箱：随机变身 + 补满弹药 + 金黄酥脆", "果冻弹床弹你上高处 · 传菜转盘会转", "巧克力酱减速 · 黄油打滑 · 地图火锅会烫、热气挡视线", "蛋糕墙能打穿；奶油裱花（BR-5）打它是补墙",
+                "金色 ★ = 你的技能能在这里联动 · 中键标记（敌人 / 这里 / 能联动）" };
+            for (int i = 0; i < map.Length; i++) Text(new Rect(x + 36, y + i * 30, pw * .5f, 28), map[i], With(small, 14, TextAnchor.MiddleLeft));
+            Text(new Rect(x + pw * .56f, y - 4, 400, 34), "6 种食物反应", large);
+            for (int i = 0; i < FoodGuide.Reactions.Length; i++) Text(new Rect(x + pw * .56f, y + 36 + i * 34, pw * .42f, 30), FoodGuide.Reactions[i], With(small, 14, TextAnchor.MiddleLeft), new Color(1f, .9f, .75f));
+        }
+        void HelpHero(float x, float y, float pw)
+        {
+            var p = game.player; if (p == null) { Text(new Rect(x + 36, y, 600, 30), "进入对局后这里显示你当前英雄的技能、被动和大招", normal); return; }
+            var h = p.Hero; var sk = h.skill;
+            Text(new Rect(x + 36, y - 4, 600, 36), h.name + " · " + h.duty, With(large, 26, TextAnchor.MiddleLeft), Color.Lerp(h.tint, Color.white, .3f));
+            float lx = x + 36, lw = pw * .5f - 40;
+            Text(new Rect(lx, y + 36, lw, 26), "F「" + sk.Name + "」", With(normal, 18, TextAnchor.MiddleLeft), h.tint);
+            string[] rows = { "目的：" + sk.Purpose, "规则：" + sk.Rule, "数值：" + sk.Numbers, "反制：" + sk.Counter, "怎么用：" + sk.HowTo };
+            var ws = new GUIStyle(wrap) { fontSize = 13 }; float ry = y + 66;
+            foreach (var r in rows) { float hh = ws.CalcHeight(new GUIContent(r), lw); GUI.Label(new Rect(lx, ry, lw, hh), r, ws); ry += hh + 6; }
+            float rx = x + pw * .53f, rw = pw * .44f;
+            Text(new Rect(rx, y + 36, rw, 26), "被动（一直生效）", With(normal, 18, TextAnchor.MiddleLeft), new Color(1f, .85f, .5f));
+            GUI.Label(new Rect(rx, y + 66, rw, 40), FoodState.Passive(p.role), new GUIStyle(wrap) { fontSize = 15 });
+            Text(new Rect(rx, y + 120, rw, 26), "X 大招「" + FoodState.UltName(p.role) + "」", With(normal, 18, TextAnchor.MiddleLeft), new Color(1f, .6f, .85f));
+            GUI.Label(new Rect(rx, y + 150, rw, 44), FoodGuide.UltEffect(p.role), new GUIStyle(wrap) { fontSize = 15 });
+            Text(new Rect(rx, y + 200, rw, 24), "充能：" + FoodGuide.UltCharge, With(tiny, 13, TextAnchor.MiddleLeft));
+            Text(new Rect(rx, y + 226, rw, 24), "当前：" + Mathf.FloorToInt(p.Food.ult * 100) + "%", With(tiny, 13, TextAnchor.MiddleLeft), new Color(1f, .85f, .3f));
+            // V22 第三期：地图联动
+            var lk = Links.For(p.role);
+            Round(new Rect(rx - 8, y + 250, rw + 16, 136), new Color(.25f, .16f, .03f, .85f), 8); Round(new Rect(rx - 8, y + 250, rw + 16, 136), Links.Gold, 8, 1.5f);
+            Text(new Rect(rx, y + 252, rw, 24), "★ 地图联动「" + Links.Name(lk) + "」 " + Links.Combo(p.role), With(normal, 15, TextAnchor.MiddleLeft), Links.Gold);
+            var lw2 = new GUIStyle(wrap) { fontSize = 12 }; string rule = "规则：" + Links.HelpRule(p.role), counter = "反制：" + Links.HelpCounter(p.role);
+            float rh = lw2.CalcHeight(new GUIContent(rule), rw); GUI.Label(new Rect(rx, y + 278, rw, rh), rule, lw2);
+            GUI.Label(new Rect(rx, y + 280 + rh, rw, 34), counter, lw2);
+        }
+        public static string HeroLinkText(Role r) { return Links.Name(Links.For(r)) + "：" + Links.HelpRule(r) + " 反制：" + Links.HelpCounter(r); }   // V22 第三期：测试读 H 页联动说明
+
         void HeroSelect(float W, float H)
         {
             var p = game.player; if (p == null) return;
@@ -968,7 +1110,7 @@ namespace NeonSiege
             float pw = Mathf.Min(1400, W - 30), ph = Mathf.Min(800, H - 30), x = (W - pw) / 2, y = (H - ph) / 2;
             Text(new Rect(x + 10, y, pw, 50), "选择英雄", title);
             bool att = p.team == game.AttackingTeam;
-            Text(new Rect(x + 210, y + 8, pw - 220, 36), (att ? "本回合：进攻方" : "本回合：防守方") + "   ·   准备剩余 " + Mathf.CeilToInt(Mathf.Max(0, game.phaseTimer)) + " 秒 · 同队不可重复", normal, att ? new Color(1f, .6f, .3f) : new Color(.4f, .8f, 1f));
+            Text(new Rect(x + 210, y + 8, pw - 220, 36), (Match.Mode == GameMode.Bomb ? (att ? "本回合：进攻方" : "本回合：防守方") : Match.ModeName(Match.Mode)) + "   ·   准备剩余 " + Mathf.CeilToInt(Mathf.Max(0, game.phaseTimer)) + " 秒 · 同队不可重复", normal, att ? new Color(1f, .6f, .3f) : new Color(.4f, .8f, 1f));
             float gap = 14, cw = (pw - gap * 5) / 6f, ch = ph - 140;
             for (int i = 0; i < 6; i++)
             {
@@ -998,8 +1140,8 @@ namespace NeonSiege
                 Icons.Draw(new Rect(cx + 10, ty + 158, 26, 26), Icons.HexFill, new Color(hero.tint.r * .3f, hero.tint.g * .3f, hero.tint.b * .3f, 1));
                 Icons.Draw(new Rect(cx + 10, ty + 158, 26, 26), Icons.HexRing, hero.tint);
                 Icons.Draw(new Rect(cx + 15, ty + 163, 16, 16), Icons.Skill(hero.role), Color.white);
-                Text(new Rect(cx + 40, ty + 160, cw - 40, 22), "F「" + hero.skill.name + "」", With(normal, 16, TextAnchor.MiddleLeft), hero.tint);
-                GUI.Label(new Rect(cx + 12, ty + 182, cw - 24, 80), hero.skill.purpose + "\n反制：" + hero.skill.counter, new GUIStyle(wrap) { fontSize = 12 });
+                Text(new Rect(cx + 40, ty + 160, cw - 40, 22), "F「" + hero.skill.Name + "」", With(normal, 16, TextAnchor.MiddleLeft), hero.tint);
+                GUI.Label(new Rect(cx + 12, ty + 182, cw - 24, 112), HeroCardText(hero), new GUIStyle(wrap) { fontSize = 12 });
                 bool canPick = game.phase == Phase.Prep;
                 if (Button(new Rect(cx + 10, cy + ch - 50, cw - 20, 40), mine ? "当前英雄" : mate != null ? "交换" : "选择", !mine, canPick && !mine))
                     game.SelectPlayerHero(hero.role);
@@ -1007,9 +1149,18 @@ namespace NeonSiege
             if (Button(new Rect(x + pw / 2 - 170, y + ph - 64, 340, 50), game.phase == Phase.Prep ? "确定 · 选择武器" : "关闭")) { if (game.phase == Phase.Prep) overlay = Overlay.Buy; else Close(); }
         }
 
-        public static Texture2D GunIcon(WeaponSpec w)
+        // V21：选英雄卡补上被动和大招（美食模式）
+        public static string HeroCardText(HeroSpec hero)
         {
+            if (!ToonAssets.Available) return hero.skill.Purpose + "\n反制：" + hero.skill.Counter;
+            return hero.skill.Purpose + "\n被动：" + FoodState.Passive(hero.role) + "\nX「" + FoodState.UltName(hero.role) + "」" + FoodGuide.UltEffect(hero.role);
+        }
+
+        public static Texture2D GunIcon(WeaponSpec w, bool exact = false)
+        {
+            if (w != null && Portraits.gunById.TryGetValue(w.id, out var e) && e != null) return e;   // V22：按枪 id 取（含免费手枪）
             foreach (var h in Config.Heroes) if (h.weapon == w && Portraits.gun.TryGetValue(h.role, out var t)) return t;
+            if (exact) return null;
             return Portraits.gun.TryGetValue(Role.Rivet, out var d) ? d : null;
         }
 
@@ -1281,9 +1432,13 @@ namespace NeonSiege
             if (Button(new Rect(sx, ly, sw / 3f - 4, 38), "显示", GameSettings.DamageNumbers)) GameSettings.DamageNumbers = true;
             if (Button(new Rect(sx + sw / 3f + 4, ly, sw / 3f - 4, 38), "隐藏", !GameSettings.DamageNumbers)) GameSettings.DamageNumbers = false;
             ly += 62;
+            Text(new Rect(lx, ly, 250, 34), "新手提示卡", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));   // V21：默认开，可关
+            if (Button(new Rect(sx, ly, sw / 3f - 4, 38), "开", GameSettings.Tips)) GameSettings.Tips = true;
+            if (Button(new Rect(sx + sw / 3f + 4, ly, sw / 3f - 4, 38), "关", !GameSettings.Tips)) GameSettings.Tips = false;
+            ly += 62;
             Text(new Rect(lx, ly, pw - 80, 26), "画质「低」关闭环境光遮蔽和泛光，阴影距离缩短，适合轻薄本。设置会自动保存。", With(small, 14, TextAnchor.MiddleLeft), new Color(.6f, .65f, .7f));
             if (Button(new Rect(x + 40, y + ph - 76, 220, 52), "恢复默认", false))
-            { GameSettings.Sensitivity = 2f; GameSettings.AdsSensitivity = 1f; GameSettings.Fov = 78f; GameSettings.Volume = .9f; GameSettings.Quality = 2; GameSettings.DamageNumbers = true; GameSettings.Apply(); }
+            { GameSettings.Sensitivity = 2f; GameSettings.AdsSensitivity = 1f; GameSettings.Fov = 78f; GameSettings.Volume = .9f; GameSettings.Quality = 2; GameSettings.DamageNumbers = true; GameSettings.Tips = true; GameSettings.Apply(); }
             if (Button(new Rect(x + pw - 300, y + ph - 76, 260, 52), "保存并返回")) { GameSettings.Save(); overlay = returnTo; if (overlay == Overlay.None) ShowCursor(false); }
         }
     }

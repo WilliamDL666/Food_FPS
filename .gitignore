@@ -18,3 +18,8 @@
 # and not needed by the cartoon / food version (Unity Companion License, not for redistribution)
 /Assets/FPSRaw/
 /Assets/FPSRaw.meta
+
+# Claude Code local backups / session logs
+/.claude.backup-*/
+/production/session-logs/
+.claude/settings.local.json

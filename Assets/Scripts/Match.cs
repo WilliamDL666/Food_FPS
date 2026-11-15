@@ -8,7 +8,11 @@ namespace NeonSiege
     public enum Phase { Prep, Live, RoundEnd, MatchEnd }
     public enum BombState { Carried, Dropped, Planted, Defused, Exploded }
 
-    public class FeedItem { public string text; public float time; public Color color; public bool kill; public Fighter killer, victim; public bool head; }
+    public class FeedItem
+    {
+        public string text; public float time; public Color color; public bool kill; public Fighter killer, victim; public bool head;
+        public WeaponSpec gun; public string cause = ""; public DamageKind kind;   // V22：播报画实际用的枪 / 技能（不是击杀者的招牌枪）
+    }
 
     public class RoundRecord
     {
@@ -16,6 +20,13 @@ namespace NeonSiege
         public string plantSite = "-", firstContactZone = "-";
         public string blueComp, redComp, routes = ""; public int[] skillUses = new int[6], skillEffective = new int[6];
         public int[] kills = new int[2];
+        // V22 第二期：地图类遥测（设计稿 §6.2）
+        public int[] killDist = new int[4];            // < 15 / 15–40 / 40–60 / > 60 m
+        public float retake = -1;                      // 下包后第一个守方进入包点用了几秒
+        public int rotate, gateClose, gateOpen, stuck, doorEnd, valves;   // 走连接巷的攻方人数 / 关门 / 开门 / 卡在交互物前 / 回合结束停在门前 / 拧蒸汽阀
+        // V22 第三期：联动触发次数（按 LinkKind：可乐弹射 / 嵌入补洞 / 果冻门帘 / 芥末辣锅 / 开墙 / 棉花糖蒸汽）、团队标记次数
+        public int[] links = new int[6]; public int pings;
+        public bool Timeout { get { return reason != null && reason.Contains("时间"); } }
     }
 
     // 爆破模式「棱能爆破」规则机：杀光对手不直接结束回合，攻方必须安装并引爆炸弹；守方拆除或拖到时间结束获胜。
@@ -89,6 +100,7 @@ namespace NeonSiege
             arena = new GameObject("霓城 · 旧港夜市街区").AddComponent<Arena>();
             arena.Build();
             ArenaLightmaps.Apply(arena);   // 编辑器里烘焙好的全局光照
+            FoodScenery.Dress(arena);      // V21：场景道具（建在 Arena 层级外、烘焙匹配之后，不影响光照贴图按顺序匹配）
             GameSettings.Apply();
             Time.timeScale = 1;
             gameObject.AddComponent<Ambience>();
@@ -99,8 +111,9 @@ namespace NeonSiege
             else if (Arg("-neonMatchTest") || Arg("-neonFFATest") || Arg("-neonCookTest") || Arg("-neonGrowTest")) gameObject.AddComponent<PlaytestRunner>().mode = "match";
             else if (Arg("-neonShots")) gameObject.AddComponent<PlaytestRunner>().mode = "shots";
             else if (Arg("-neonRangeTest")) gameObject.AddComponent<PlaytestRunner>().mode = "range";
-            if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); gameObject.AddComponent<InteractMarkers>(); }
+            if (ToonAssets.Available) { gameObject.AddComponent<Airdrop>(); gameObject.AddComponent<FoodHud>(); gameObject.AddComponent<InteractMarkers>(); gameObject.AddComponent<FoodTips>(); }
             gameObject.AddComponent<TuningPanel>(); gameObject.AddComponent<CombatHud>(); gameObject.AddComponent<RangeHud>();
+            gameObject.AddComponent<LinkHud>();   // V22 第三期：联动提示 / 团队标记 / 敌方大招预警
             StartMatch();
         }
 
@@ -260,6 +273,7 @@ namespace NeonSiege
             round++;
             Skills.ClearRound();
             arena.ResetRound();
+            Pings.Clear(); UltWarn.Clear();   // V22 第三期
             if (FFA)
             {
                 foreach (var f in fighters) { f.alive = false; RespawnFFA(f); }
@@ -307,6 +321,7 @@ namespace NeonSiege
             arena.SetSpawnBarriers(true);
             defendersWipedAnnounced = false;
             current = new RoundRecord { round = round, attackers = AttackingTeam };
+            stillFrom.Clear(); stillSince.Clear(); stuckFlag.Clear(); rotated.Clear();
             if (ui != null) ui.OnPrep();
             Feed("第 " + round + " 回合 · " + Config.TeamName(AttackingTeam) + "进攻 / " + Config.TeamName(DefendingTeam) + "防守", Color.white);
         }
@@ -431,7 +446,55 @@ namespace NeonSiege
                         }
             }
             foreach (var f in fighters) if (f.alive && Arena.SiteAt(f.transform.position) >= 0) f.stats.captureTime += dt;
+            MapTelemetryTick();
         }
+
+        // ------------------------------------------------------------------ V22 第二期：地图遥测
+        readonly Dictionary<Fighter, Vector3> stillFrom = new Dictionary<Fighter, Vector3>();
+        readonly Dictionary<Fighter, float> stillSince = new Dictionary<Fighter, float>();
+        readonly HashSet<Fighter> stuckFlag = new HashSet<Fighter>(), rotated = new HashSet<Fighter>();
+        float nextMapSample;
+        // 北烤串巷 / 南后厨（方案甲新增的两条中段连接）
+        public static bool InLink(Vector3 p) { return p.x > -5.5f && p.x < 1.5f && Mathf.Abs(p.z) > 10f && Mathf.Abs(p.z) < 30f; }
+        // 门 / 卷帘门 / 蒸笼门 / 墙洞 3 m 内
+        public bool NearDoor(Vector3 p, float r = 3f)
+        {
+            if (arena == null) return false;
+            foreach (var s in arena.shutters) if (s != null && FlatDistance(s.transform.position, p) < r + (s.gate ? 1.5f : .5f)) return true;
+            foreach (var d in arena.doors) if (d != null && FlatDistance(d.transform.position, p) < r) return true;
+            foreach (var d in arena.destructibles) if (d != null && d.name.Contains("墙洞") && FlatDistance(d.transform.position, p) < r) return true;
+            return false;
+        }
+        static float FlatDistance(Vector3 a, Vector3 b) { a.y = b.y = 0; return Vector3.Distance(a, b); }
+
+        void MapTelemetryTick()
+        {
+            if (current == null || Time.time < nextMapSample) return;
+            nextMapSample = Time.time + .25f;
+            if (Planted && current.retake < 0)
+                foreach (var f in fighters) if (f.alive && f.team == DefendingTeam && Arena.SiteAt(f.transform.position) == plantedSite) { current.retake = Time.time - liveStartedAt - current.plantTime; break; }
+            foreach (var f in fighters)
+            {
+                if (!f.alive || f.team != AttackingTeam) continue;
+                Vector3 p = f.transform.position;
+                if (InLink(p) && rotated.Add(f)) current.rotate++;
+                // 交火中（3 秒内开过枪 / 挨过打）原地扫射不算卡住；下包后守包也不算
+                if (Planted || f.bombBusy || Time.time - f.lastShotAt < 3f || Time.time - f.lastDamageAt < 3f) { stillFrom[f] = p; stillSince[f] = Time.time; stuckFlag.Remove(f); continue; }
+                if (!stillFrom.TryGetValue(f, out Vector3 from) || FlatDistance(from, p) > .6f) { stillFrom[f] = p; stillSince[f] = Time.time; stuckFlag.Remove(f); continue; }
+                if (!stillSince.TryGetValue(f, out float since)) { stillSince[f] = Time.time; continue; }
+                if (Time.time - since >= 5f && !stuckFlag.Contains(f) && NearDoor(p))
+                {
+                    stuckFlag.Add(f); current.stuck++;
+                    if (autoplay) Debug.Log("NEON_STUCK r" + round + " " + f.Hero.name + " pos=" + p.ToString("F1") + " route=" + f.routeName);
+                }
+            }
+        }
+
+        // 蒸笼门 / 蒸汽阀调用
+        public void OnGate(bool open) { if (current != null && phase == Phase.Live) { if (open) current.gateOpen++; else current.gateClose++; } }
+        public void OnValve() { if (current != null && phase == Phase.Live) current.valves++; }
+        public void OnLink(LinkKind k) { if (current != null && phase == Phase.Live) current.links[(int)k]++; }   // V22 第三期
+        public void OnPing() { if (current != null && phase == Phase.Live) current.pings++; }
 
         // Called every frame from Fighter.HandleUse. Returns true when the bomb consumed the E key.
         public bool BombAction(Fighter f, bool held, float dt)
@@ -515,7 +578,7 @@ namespace NeonSiege
                 if (f.alive)
                 {
                     float d = Vector3.Distance(f.Chest, p);
-                    if (d < Config.BombBlastRadius) f.ReceiveDamage(500 * (1 - d / Config.BombBlastRadius) + 20, null, p, false, true);
+                    if (d < Config.BombBlastRadius) { DamageCtx.Set(DamageKind.Bomb, ToonAssets.FoodText("棱能炸弹") + "爆炸"); f.ReceiveDamage(500 * (1 - d / Config.BombBlastRadius) + 20, null, p, false, true); }
                 }
             EndRound(AttackingTeam, "棱能炸弹引爆");
         }
@@ -523,7 +586,10 @@ namespace NeonSiege
         public void OnKilled(Fighter victim, Fighter killer, bool head)
         {
             string k = killer != null ? killer.Hero.name : "爆炸";
-            feed.Add(new FeedItem { text = k + " ▶ " + victim.Hero.name, time = Time.unscaledTime, color = killer != null ? Config.TeamColor(killer.team) : Color.white, kill = true, killer = killer, victim = victim, head = head });
+            var item = new FeedItem { text = k + " ▶ " + victim.Hero.name, time = Time.unscaledTime, color = killer != null ? Config.TeamColor(killer.team) : Color.white, kill = true, killer = killer, victim = victim, head = head };
+            if (CombatHud.LastHit(victim, out HitRecord kb)) { item.gun = kb.gun; item.cause = kb.weapon ?? ""; item.kind = kb.kind; if (killer == null && kb.kind != DamageKind.Gun) k = kb.weapon; }   // 致命一击的真实来源
+            item.text = k + " ▶ " + victim.Hero.name;
+            feed.Add(item);
             if (feed.Count > 7) feed.RemoveAt(0);
             if (Mode == GameMode.Range) { Range.OnKilled(victim); return; }
             if (FFA)
@@ -543,7 +609,12 @@ namespace NeonSiege
                 ffaRespawnAt[victim] = Time.time + 4f;
                 return;
             }
-            if (killer != null && killer.team != victim.team && current != null) current.kills[killer.team]++;
+            if (killer != null && killer.team != victim.team && current != null)
+            {
+                current.kills[killer.team]++;
+                float kd = Vector3.Distance(killer.transform.position, victim.transform.position);
+                current.killDist[kd < 15f ? 0 : kd < 40f ? 1 : kd < 60f ? 2 : 3]++;
+            }
             if (killer != null && killer.team != victim.team) killer.credits = Mathf.Min(Config.MaxCredits, killer.credits + Config.KillCredits);
             if (victim == BombCarrier && bomb == BombState.Carried)
             {
@@ -573,8 +644,21 @@ namespace NeonSiege
             {
                 current.firstContact = Time.time - liveStartedAt;
                 Vector3 p = victim.transform.position;
-                current.firstContactZone = p.z > 30 ? "北长街" : p.z < -30 ? "南工厂通道" : p.x > 24 ? (p.z > 14 ? "A点" : p.z < -14 ? "B点" : "中庭") : p.x > 12 ? "连廊" : "夜市主街";
+                current.firstContactZone = ContactZone(p);
             }
+        }
+
+        // V22 第二期：在旧分类上加 关口 / 连接巷 / 中段十字 / 奶油平台，改前改后可比
+        public static string ContactZone(Vector3 p)
+        {
+            if (InLink(p)) return p.z > 0 ? "北烤串巷" : "南后厨";
+            if (Mathf.Abs(p.z) > 30 && p.x > -2 && p.x < 14) return p.z > 0 ? "北关口" : "南关口";
+            if (p.z > 30) return "北长街";
+            if (p.z < -30) return "南工厂通道";
+            if (p.x > 24) return p.z > 14 ? "A点" : p.z < -14 ? "B点" : "中庭";
+            if (p.x > 12) return Mathf.Abs(p.z) < 6 ? "中庭" : "连廊";
+            if (p.x > -12 && p.x < 4) return "中段十字";
+            return "夜市主街";
         }
 
         void EndRound(int winner, string reason)
@@ -594,6 +678,7 @@ namespace NeonSiege
                 foreach (var f in fighters)
                     Debug.Log("NEON_ROUNDEND r" + round + " " + (f.team == AttackingTeam ? "攻" : "守") + " " + f.Hero.name + " alive=" + f.alive + " pos=" + f.transform.position.ToString("F0") + " route=" + f.routeName + " carrier=" + (BombCarrier == f));
             foreach (var f in fighters) { f.bombBusy = false; }
+            if (current.plantSite == "-") foreach (var f in fighters) if (f.alive && f.team == AttackingTeam && NearDoor(f.transform.position)) current.doorEnd++;   // 只统计没下包的回合（下包后守在门边是战术位置）
             current.winner = winner; current.reason = reason; current.duration = Time.time - liveStartedAt;
             var routes = new StringBuilder();
             foreach (var f in fighters)
@@ -630,7 +715,7 @@ namespace NeonSiege
         {
             if (f == player && ui != null) ui.SkillFlash();
             if (player != null && f.team != player.team && Vector3.Distance(f.transform.position, player.transform.position) < 30f)
-                Feed("敌方 " + f.Hero.name + " 使用了「" + f.Hero.skill.name + "」", new Color(1f, .55f, .5f));
+                Feed("敌方 " + f.Hero.name + " 使用了「" + f.Hero.skill.Name + "」", new Color(1f, .55f, .5f));
             foreach (var b in fighters) if (b.team != f.team && b.alive) { if (b.TryGetComponent(out Bot bb)) bb.Hear(f, f.transform.position, 1.5f); }
         }
 
@@ -684,23 +769,55 @@ namespace NeonSiege
             cam.transform.rotation = Quaternion.Slerp(cam.transform.rotation, Quaternion.LookRotation(center - cam.transform.position), Time.unscaledDeltaTime * 2f);
         }
 
+        // V22 第二期：整场地图指标汇总（设计稿 §6.2），NEON_MAP_SUMMARY 一行给 Agent 读
+        public string MapSummary()
+        {
+            int n = 0, timeouts = 0, a = 0, b = 0, rot = 0, gateRounds = 0, stuck = 0, doorEnd = 0, retN = 0, pings = 0; float ret = 0;
+            var kd = new int[4]; var zones = new Dictionary<string, int>(); var lk = new int[6];
+            foreach (var r in records)
+            {
+                n++; if (r.Timeout) timeouts++;
+                for (int i = 0; i < 6; i++) lk[i] += r.links[i]; pings += r.pings;
+                if (r.plantSite == "A") a++; else if (r.plantSite == "B") b++;
+                if (r.rotate > 0) rot++; if (r.gateClose > 0) gateRounds++;
+                stuck += r.stuck; doorEnd += r.doorEnd;
+                if (r.retake >= 0) { ret += r.retake; retN++; }
+                for (int i = 0; i < 4; i++) kd[i] += r.killDist[i];
+                zones[r.firstContactZone] = (zones.TryGetValue(r.firstContactZone, out int z) ? z : 0) + 1;
+            }
+            int kills = kd[0] + kd[1] + kd[2] + kd[3];
+            string Pct(int v, int of) { return of > 0 ? (v * 100f / of).ToString("0") + "%" : "-"; }
+            var zs = new StringBuilder(); foreach (var kv in zones) zs.Append(kv.Key).Append(':').Append(kv.Value).Append(' ');
+            return "rounds=" + n + " timeout=" + timeouts + "(" + Pct(timeouts, n) + ") plantA:B=" + a + ":" + b
+                + " kills=" + kills + " near/mid/far/xfar=" + kd[0] + "/" + kd[1] + "/" + kd[2] + "/" + kd[3] + "(" + Pct(kd[0], kills) + "/" + Pct(kd[1], kills) + "/" + Pct(kd[2], kills) + "/" + Pct(kd[3], kills) + ")"
+                + " retake=" + (retN > 0 ? (ret / retN).ToString("0.0") : "-") + "s(n=" + retN + ") rotateRounds=" + rot + "(" + Pct(rot, n) + ") gateCloseRounds=" + gateRounds + "(" + Pct(gateRounds, n) + ")"
+                + " stuck=" + stuck + " doorEnd=" + doorEnd + " contact=[" + zs.ToString().Trim() + "]"
+                + " links(cola/patch/curtain/pot/breach/steam)=" + string.Join("/", lk) + " pings=" + pings;
+        }
+
         // ------------------------------------------------------------------ 试玩记录
         public string WriteTelemetry()
         {
             var sb = new StringBuilder();
-            sb.AppendLine("round,attackers,winner,reason,duration_s,plant_site,plant_time_s,first_contact_s,first_contact_zone,blue_kills,red_kills,blue_comp,red_comp,routes,skill_uses(猎隼/铆钉/铁幕/夜鸦/焚芯/幻频),skill_effective");
+            sb.AppendLine("round,attackers,winner,reason,duration_s,plant_site,plant_time_s,first_contact_s,first_contact_zone,blue_kills,red_kills,blue_comp,red_comp,routes,skill_uses(猎隼/铆钉/铁幕/夜鸦/焚芯/幻频),skill_effective,"
+                + "kill_near(<15),kill_mid(15-40),kill_far(40-60),kill_xfar(>60),retake_s,rotate_attackers,gate_close,gate_open,stuck,door_end,timeout,valves,"
+                + "link_cola,link_patch,link_curtain,link_pot,link_breach,link_steam,pings");
             foreach (var r in records)
                 sb.AppendLine(string.Join(",", r.round, Config.TeamName(r.attackers), r.winner < 0 ? "draw" : Config.TeamName(r.winner), r.reason, r.duration.ToString("0.0"),
                     r.plantSite, r.plantTime.ToString("0.0"), r.firstContact.ToString("0.0"), r.firstContactZone, r.kills[0], r.kills[1],
-                    r.blueComp, r.redComp, "\"" + r.routes + "\"", string.Join("/", r.skillUses), string.Join("/", r.skillEffective)));
+                    r.blueComp, r.redComp, "\"" + r.routes + "\"", string.Join("/", r.skillUses), string.Join("/", r.skillEffective),
+                    r.killDist[0], r.killDist[1], r.killDist[2], r.killDist[3], r.retake.ToString("0.0"), r.rotate, r.gateClose, r.gateOpen, r.stuck, r.doorEnd, r.Timeout ? 1 : 0, r.valves,
+                    r.links[0], r.links[1], r.links[2], r.links[3], r.links[4], r.links[5], r.pings));
+            sb.AppendLine();
+            sb.AppendLine("summary," + MapSummary());
             // V20：每个角色的战斗数据（部位命中分布、护甲伤害、穿墙命中、技能使用 / 有效）
             sb.AppendLine();
-            sb.AppendLine("fighter,team,weapon,kills,deaths,damage,armor_damage,shots,hits,accuracy,head,chest,stomach,arm,leg,pierced,skill_uses,skill_effective");
+            sb.AppendLine("fighter,team,weapon,kills,deaths,damage,armor_damage,shots,hits,accuracy,head,chest,stomach,arm,leg,pierced,skill_uses,skill_effective,swallowed_shots,exhaust_count");
             foreach (var f in fighters)
             {
                 var st = new Stats(); st.Add(f.matchStats); if (phase != Phase.RoundEnd && phase != Phase.MatchEnd) st.Add(f.stats);
                 sb.AppendLine(string.Join(",", f.Hero.name, Config.TeamName(f.team), f.W.id, st.kills, st.deaths, st.damage.ToString("0"), st.armorDamage.ToString("0"), st.shots, st.hits,
-                    st.shots > 0 ? (st.hits * 100f / st.shots).ToString("0.0") + "%" : "-", st.headshots, st.chestHits, st.stomachHits, st.armHits, st.legHits, st.pierced, st.skillUses, st.skillEffective));
+                    st.shots > 0 ? (st.hits * 100f / st.shots).ToString("0.0") + "%" : "-", st.headshots, st.chestHits, st.stomachHits, st.armHits, st.legHits, st.pierced, st.skillUses, st.skillEffective, st.swallowedShots, st.exhaustCount));
             }
             string dir = System.IO.Path.Combine(Application.isEditor ? System.IO.Path.GetDirectoryName(Application.dataPath) : Application.persistentDataPath, "Playtest");
             try

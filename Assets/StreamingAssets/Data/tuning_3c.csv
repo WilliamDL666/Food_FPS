@@ -32,3 +32,6 @@ BobScale,1
 ShakeScale,1
 SprintFovAdd,6
 SlideFovAdd,10
+HudStaminaFade,1
+HudExhaustPulseHz,2.5
+HudRecoverFlash,0.35

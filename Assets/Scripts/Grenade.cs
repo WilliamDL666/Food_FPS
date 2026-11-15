@@ -97,7 +97,7 @@ namespace NeonSiege
                     if (!Skills.LineClear(p + Vector3.up * .2f, f.Chest, f)) continue;
                     float dmg = MaxDamage * Mathf.Clamp01(1f - d / rad) * (f == owner ? .5f : 1f);
                     if (dmg < 4f) continue;
-                    f.ReceiveDamage(dmg, owner, p, false, true);
+                    DamageCtx.Set(DamageKind.Grenade, ToonAssets.Available ? "汽水罐手雷" : "手雷"); f.ReceiveDamage(dmg, owner, p, false, true);
                     if (owner != null && owner.human && f != owner) { owner.hitMarkerUntil = Time.time + .25f; owner.hitMarkerHead = false; owner.hitMarkerKill = !f.alive; Fx.AddNumber(f.Chest, dmg, false, false, !f.alive, f); }
                 }
             var hitProps = new System.Collections.Generic.HashSet<IDamageable>();

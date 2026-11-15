@@ -1,5 +1,6 @@
 # Blender (5.x) headless script: Fall Guys–style jelly-bean character on the Quaternius Toon Shooter rig.
 # Keeps the skeleton, all 17 animations and the hand-held gun nodes, replaces the soldier body with a bean.
+# V21: adds two procedural actions, Prone and Prone_Crawl (19 clips total).
 # Also exports six food hats (one per hero).
 # Run:  blender.exe -b -P Tools/blender_bean_character.py -- <chars_out_dir> <hats_out_dir>
 import bpy, bmesh, math, sys, os
@@ -105,6 +106,138 @@ for s in (1, -1):
     shoe = sphere('Shoe.' + sd, (s * .188, -.05, .07), (.12, .17, .085), SHOE, 24)
     weight(shoe, arm, lambda c, sd=sd: {'Foot.' + sd: 1})
     for o in (a, hand, leg, shoe): smooth(o, 1)
+
+# ------------------------------------------------------------------ V21：趴下 Prone / 匍匐 Prone_Crawl（"摊成煎饼"）
+# 从 Idle_Shoot 第 0 帧（持枪瞄准）出发，在世界空间里摆姿势：身体整体前倒 90° 贴地、双臂前伸托枪、腿向后伸。
+# 枪挂在 Index1.R 上：每一帧把 Index1.R 的世界朝向还原成 Idle_Shoot 的朝向，枪始终水平朝前。
+# 头部基本不抬：帽子坐在豆子顶端，抬头会把帽子竖起来，最高点超过 0.8 米（判定框 0.70 米）。
+from mathutils import Matrix, Quaternion
+def build_prone_actions(arm):
+    sc = bpy.context.scene; fps = sc.render.fps / sc.render.fps_base
+    upd = bpy.context.view_layer.update
+    AW = arm.matrix_world.copy(); AWi = AW.inverted(); P = arm.pose.bones
+    ad = arm.animation_data or arm.animation_data_create()
+    act0, nla0 = ad.action, ad.use_nla
+    skinned = [o for o in bpy.data.objects if o.type == 'MESH' and any(m.type == 'ARMATURE' and m.object == arm for m in o.modifiers)]
+
+    def extent():
+        dg = bpy.context.evaluated_depsgraph_get(); lo, hi = 1e9, -1e9
+        for o in skinned:
+            e = o.evaluated_get(dg); me = e.to_mesh(); mw = e.matrix_world
+            for v in me.vertices:
+                z = (mw @ v.co).z; lo = min(lo, z); hi = max(hi, z)
+            e.to_mesh_clear()
+        return lo, hi
+
+    # 游戏里的缩放：FighterAvatar 按静止姿态的包围盒把角色缩放到 1.85 米
+    arm.data.pose_position = 'REST'; upd(); r_lo, r_hi = extent(); arm.data.pose_position = 'POSE'; upd()
+    k = 1.85 / (r_hi - r_lo); print('BEAN_REST_HEIGHT', round(r_hi - r_lo, 3), 'game_scale', round(k, 3))
+
+    ad.use_nla = False
+    for pb in P: pb.rotation_mode = 'QUATERNION'
+    idle = next((a for a in bpy.data.actions if a.name.split('|')[-1] == 'Idle_Shoot'), None) or next((a for a in bpy.data.actions if 'Idle_Shoot' in a.name), None)
+    if idle is None: raise RuntimeError('Idle_Shoot action not found')
+    ad.action = idle
+    if hasattr(ad, 'action_slot') and ad.action_slot is None and len(getattr(idle, 'slots', [])): ad.action_slot = idle.slots[0]
+    sc.frame_set(int(idle.frame_range[0]))
+    ref = {pb.name: (pb.location.copy(), pb.rotation_quaternion.copy(), pb.scale.copy()) for pb in P}
+    ad.action = None
+
+    LEGS = ('UpperLeg.L', 'LowerLeg.L', 'Foot.L', 'UpperLeg.R', 'LowerLeg.R', 'Foot.R')
+    def base():
+        for pb in P:
+            l, q, s = ref[pb.name]; pb.location = l; pb.rotation_quaternion = q; pb.scale = s
+        for n in LEGS:
+            if n in P: P[n].matrix_basis = Matrix.Identity(4)   # 腿从直立静止姿态开始摆
+        upd()
+    def W(n): return AW @ P[n].matrix
+    def setW(n, Mw): P[n].matrix = AWi @ Mw; upd()
+    def rot(n, axis, deg):
+        Mw = W(n); p = Mw.translation.copy()
+        setW(n, Matrix.Translation(p) @ Matrix.Rotation(math.radians(deg), 4, axis) @ Matrix.Translation(-p) @ Mw)
+    def move(n, d): setW(n, Matrix.Translation(Vector(d)) @ W(n))
+    def turn(n, q):
+        Mw = W(n); p = Mw.translation.copy()
+        setW(n, Matrix.Translation(p) @ q.to_matrix().to_4x4() @ Matrix.Translation(-p) @ Mw)
+    def aim(n, d):   # 骨骼 +Y 指向世界方向 d
+        cur = (W(n).to_3x3() @ Vector((0, 1, 0))).normalized()
+        turn(n, cur.rotation_difference(Vector(d).normalized()))
+
+    base(); gun_ref = W('Index1.R').to_3x3() if 'Index1.R' in P else None
+    # 脚是 Root 的子骨骼（原骨架用 IK），这里让脚刚性跟着小腿，脚尖顺着小腿方向绷直
+    foot_rel = {sd: P['LowerLeg.' + sd].bone.matrix_local.inverted() @ P['Foot.' + sd].bone.matrix_local for sd in 'LR'}
+    fwd_arm = (AWi.to_3x3() @ Vector((0, -1, 0))).normalized()   # 世界"前方"（-Y）换到骨架空间
+    toe_local = {sd: P['Foot.' + sd].bone.matrix_local.to_3x3().inverted() @ fwd_arm for sd in 'LR'}
+    def feet():
+        for sd in 'LR':
+            setW('Foot.' + sd, W('LowerLeg.' + sd) @ foot_rel[sd])
+            toe = (W('Foot.' + sd).to_3x3() @ toe_local[sd]).normalized()
+            shin = (W('LowerLeg.' + sd).to_3x3() @ Vector((0, 1, 0))).normalized()
+            turn('Foot.' + sd, Quaternion().slerp(toe.rotation_difference(shin), .75))
+
+    def pose(ph=None, breath=0.0):
+        """ph=None：静止趴姿；ph∈[0,1)：匍匐循环相位。返回 (各骨骼局部 TRS, 最低点, 最高点)"""
+        base()
+        s = math.sin(2 * math.pi * ph) if ph is not None else 0.0
+        kick = {'L': max(0.0, s), 'R': max(0.0, -s)}           # 左右腿交替蛙蹬
+        rot('Body', 'X', 90)                                   # 整个身体向前（-Y）倒平
+        if ph is not None: rot('Body', 'Z', 7 * s); rot('Body', 'Y', 3 * s)   # 扭屁股 + 左右滚（V22：滚动 6°→3°，压低匍匐最高点，M21 留余量）
+        rot('Torso', 'X', -1 - breath)
+        rot('Head', 'X', -2 + (1.0 * abs(s) if ph is not None else 0.0))
+        for sd, sx in (('L', 1), ('R', -1)):                   # 双臂前伸（"超人"姿势），右手托枪
+            d = Vector((sx * (.12 if sd == 'L' else .28), -1, .04))
+            if ph is not None: d = Matrix.Rotation(math.radians(6 * s * sx), 3, 'Z') @ d   # 两臂交替划
+            aim('UpperArm.' + sd, d); aim('LowerArm.' + sd, d)
+        if gun_ref is not None:
+            setW('Index1.R', Matrix.Translation(W('Index1.R').translation) @ gun_ref.to_4x4())
+        for sd, sx in (('L', 1), ('R', -1)):                   # 腿向后伸、贴地，小腿翘起
+            kk = kick[sd] if ph is not None else 0.0
+            rot('UpperLeg.' + sd, 'X', -18)
+            rot('UpperLeg.' + sd, 'Z', -sx * (12 + 30 * kk))
+            rot('LowerLeg.' + sd, 'X', 40 + 25 * kk)
+            rot('LowerLeg.' + sd, 'Z', sx * 25 * kk)
+        hy = W('Head').translation.y
+        move('Body', (0, -.30 - hy, 0))                        # 头在原点前方约 0.3（判定框中心附近）
+        feet(); lo, hi = extent()
+        move('Body', (0, 0, -lo - .015 + (.008 * abs(s) if ph is not None else 0.0)))   # 贴地（略微压进地面），爬的时候轻微起伏（V22：起伏 .025→.008）
+        feet(); lo, hi = extent()
+        return {pb.name: (pb.location.copy(), pb.rotation_quaternion.copy(), pb.scale.copy()) for pb in P}, lo, hi
+
+    def bake(name, keys):
+        ad.action = None; prev = {}
+        for t, snap in keys:
+            f = round(t * fps)
+            for pb in P:
+                l, q, s = snap[pb.name]; q = q.copy()
+                if pb.name in prev and prev[pb.name].dot(q) < 0: q.negate()   # 四元数连续，避免插值时转一大圈
+                prev[pb.name] = q
+                pb.location = l; pb.rotation_quaternion = q; pb.scale = s
+                for dp in ('location', 'rotation_quaternion', 'scale'): pb.keyframe_insert(dp, frame=f, group=pb.name)
+        act = ad.action; act.name = name; act.use_fake_user = True
+        if act.name != name: raise RuntimeError('action name taken: ' + act.name)
+        others = [t for t in ad.nla_tracks]
+        tr = ad.nla_tracks.new(); tr.name = name; tr.strips.new(name, int(act.frame_range[0]), act)
+        if others: tr.mute = others[0].mute
+        ad.action = None
+        return act
+
+    top = 0.0
+    keys = []
+    for t, b in ((0, 0.0), (1, 1.5), (2, 0.0)):              # Prone：2 秒呼吸循环
+        snap, lo, hi = pose(None, b); keys.append((t, snap)); top = max(top, hi - lo)
+    bake('Prone', keys)
+    keys = []; N = 8
+    for i in range(N):                                         # Prone_Crawl：1 秒匍匐循环
+        snap, lo, hi = pose(i / N); keys.append((i / N, snap)); top = max(top, hi - lo)
+    keys.append((1.0, keys[0][1])); bake('Prone_Crawl', keys)
+    print('BEAN_PRONE_TOP rig=%.3f game=%.3f m (body only, hat/gun not included)' % (top, top * k))
+
+    for pb in P: pb.matrix_basis = Matrix.Identity(4)
+    ad.action = act0; ad.use_nla = nla0
+    if act0 is not None and hasattr(ad, 'action_slot') and ad.action_slot is None and len(getattr(act0, 'slots', [])): ad.action_slot = act0.slots[0]
+    sc.frame_set(sc.frame_current); upd()
+
+build_prone_actions(arm)
 
 fallguys_style.apply(None, bevel_mul=1.0, s_mul=1.0)
 path = os.path.join(OUT, 'Character_Bean.glb')

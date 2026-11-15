@@ -106,6 +106,7 @@ namespace NeonSiege
             var pivot = new GameObject("甜品武器 " + w.id).transform;
             var t = new GameObject("model").transform; t.SetParent(pivot, false);
             float muzzleZ = .4f, top = .06f, muzzleY = .03f;
+            Vector3 gripLocal = Vector3.zero;   // V22：枪 glb 里 Grip 节点（未缩放的模型空间），第一人称手臂右手对准它
             // V17：美食枪（整把枪就是一种食物）优先，其次是 V15 的甜品枪
             var glb = Resources.Load<GameObject>("Toon/FoodGuns/" + GlbName(w.id)) ?? Resources.Load<GameObject>("Toon/Dessert/" + GlbName(w.id));
             FoodGunAnim anim = null;
@@ -113,8 +114,12 @@ namespace NeonSiege
             {
                 var g = Object.Instantiate(glb, t, false); g.name = "Blender美食枪";
                 foreach (var c in g.GetComponentsInChildren<Collider>()) Object.Destroy(c);
+                // V21：外部素材包的枪自带整枪 Fire/Reload/Idle 片段，交给 FoodGunAnim 统一控制，不让它自动播放
+                foreach (var a in g.GetComponentsInChildren<Animation>()) { a.Stop(); a.enabled = false; }
+                foreach (var a in g.GetComponentsInChildren<Animator>()) a.enabled = false;
                 var mz = FindDeep(g.transform, "Muzzle");
                 if (mz != null) { var ml = t.InverseTransformPoint(mz.position); muzzleZ = ml.z; muzzleY = ml.y; }
+                var gp = FindDeep(g.transform, "Grip"); if (gp != null) gripLocal = t.InverseTransformPoint(gp.position);
                 anim = pivot.gameObject.AddComponent<FoodGunAnim>();
                 anim.tea = FindDeep(g.transform, "TeaLevel"); anim.spin = FindDeep(g.transform, "Spin");
                 if (FindDeep(g.transform, "Haw0") != null) { anim.haws = new Transform[5]; for (int i = 0; i < 5; i++) anim.haws[i] = FindDeep(g.transform, "Haw" + i); }
@@ -147,7 +152,9 @@ namespace NeonSiege
             parts.sightLocal = new Vector3(0, top * scale, .05f * scale);
             parts.foregrip = new Vector3(0, -.02f, muzzleZ * .55f) * scale;
             foreach (var r in pivot.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = firstPerson ? UnityEngine.Rendering.ShadowCastingMode.Off : UnityEngine.Rendering.ShadowCastingMode.On;
-            if (firstPerson)
+            var fpArms = firstPerson && glb != null ? Resources.Load<GameObject>("Toon/FPArms/FPArms_Sweater") : null;
+            if (fpArms != null) AttachArms(fpArms, pivot, parts, w.id, gripLocal * scale);   // V22：甜心针织袖手臂（Tools/blender_fp_arms.py）
+            else if (firstPerson)
             {
                 var glove = Resources.Load<GameObject>("Toon/FoodGuns/Glove");
                 foreach (var (pos, sc) in new[] { (new Vector3(.005f, -.05f, -.01f), new Vector3(.08f, .08f, .09f)), (parts.foregrip + new Vector3(-.01f, -.03f, 0), new Vector3(.075f, .075f, .085f)) })
@@ -162,6 +169,37 @@ namespace NeonSiege
                 }
             }
             return pivot;
+        }
+
+        // ---------------- V22：第一人称手臂
+        // FPArms_Sweater.glb 建在"枪 pivot 空间"（未缩放，握把在原点）：Arm_R/L → Forearm → Hand → Glove，Palm_R/L 是拳心。
+        // 右手：Palm_R 对准 Grip 节点 + 默认偏移；左手：Palm_L 对准 parts.foregrip + 默认偏移（手枪改成托在握把左下）。
+        // 每把枪的微调写在 HandTune 里（米，pivot 空间：x 右 / y 上 / z 前）。
+        static readonly Vector3 RightFromGrip = new Vector3(0f, -.03f, -.004f), LeftFromForegrip = new Vector3(-.004f, -.01f, .012f), LeftPistol = new Vector3(-.03f, -.055f, .01f);
+        static readonly Dictionary<string, (Vector3 r, Vector3 l)> HandTune = new Dictionary<string, (Vector3 r, Vector3 l)>
+        {
+            { "P-9", (Vector3.zero, new Vector3(0f, .01f, 0f)) },   // 左手托得太低，上调 1 cm { "SMG-7", (Vector3.zero, Vector3.zero) }, { "AR-9", (Vector3.zero, Vector3.zero) },
+            { "LMG-2", (Vector3.zero, Vector3.zero) }, { "DMR-3", (Vector3.zero, Vector3.zero) }, { "FS-12", (Vector3.zero, Vector3.zero) }, { "BR-5", (Vector3.zero, Vector3.zero) },
+        };
+        static void AttachArms(GameObject pf, Transform pivot, GunParts parts, string id, Vector3 grip)
+        {
+            var a = Object.Instantiate(pf, pivot, false); a.name = "第一人称手臂";
+            a.transform.localPosition = Vector3.zero; a.transform.localRotation = Quaternion.identity; a.transform.localScale = Vector3.one;
+            foreach (var c in a.GetComponentsInChildren<Collider>()) Object.Destroy(c);
+            foreach (var r in a.GetComponentsInChildren<Renderer>()) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            HandTune.TryGetValue(id, out var tune);
+            Vector3 rT = grip + RightFromGrip + tune.r;
+            Vector3 lT = (id == "P-9" ? grip + LeftPistol : parts.foregrip + LeftFromForegrip) + tune.l;
+            Snap(FindDeep(a.transform, "Arm_R"), FindDeep(a.transform, "Palm_R"), pivot, rT);
+            var armL = FindDeep(a.transform, "Arm_L");
+            Snap(armL, FindDeep(a.transform, "Palm_L"), pivot, lT);
+            parts.arms = a.transform; parts.armL = armL; parts.palmLTarget = lT;
+            if (armL != null) parts.armLRest = pivot.InverseTransformPoint(armL.position);
+        }
+        static void Snap(Transform arm, Transform palm, Transform pivot, Vector3 target)
+        {
+            if (arm == null || palm == null) return;
+            arm.position += pivot.TransformPoint(target) - palm.position;
         }
 
         static string GlbName(string id) => id switch { "SMG-7" => "SMG7", "AR-9" => "AR9", "LMG-2" => "LMG2", "DMR-3" => "DMR3", "FS-12" => "FS12", "BR-5" => "BR5", _ => "P9" };

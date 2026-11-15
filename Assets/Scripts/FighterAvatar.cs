@@ -7,10 +7,54 @@ namespace NeonSiege
     // with IK for the rifle hold, aim look-at and a foot-IK crouch.
     public class FighterAvatar : MonoBehaviour
     {
+        // V22：第一人称手臂着色。FPArm_Sleeve / FPArm_Skin = 队伍色（和豆子身体同一个 Lerp），FPArm_Cuff = 英雄色；手套 / 缝线保持原色。
+        public static readonly Color FPArmsUnset = new Color(-1, -1, -1);
+        public static void TintFPArms(Transform arms, Color team, Color hero)
+        {
+            if (arms == null) return;
+            Color sleeve = Color.Lerp(team, Color.white, .1f);
+            foreach (var r in arms.GetComponentsInChildren<Renderer>(true))
+            {
+                var mats = r.materials; bool any = false;
+                for (int i = 0; i < mats.Length; i++)
+                {
+                    string n = System.Text.RegularExpressions.Regex.Replace(mats[i].name.Replace(" (Instance)", ""), @"\.\d+$", "");   // Blender 导出可能带 .001
+                    Color c = n == "FPArm_Sleeve" || n == "FPArm_Skin" ? sleeve : n == "FPArm_Cuff" ? hero : FPArmsUnset;
+                    if (c.r < 0) continue;
+                    if (mats[i].HasProperty("baseColorFactor")) mats[i].SetColor("baseColorFactor", c);
+                    if (mats[i].HasProperty("_Color")) mats[i].SetColor("_Color", c);
+                    if (mats[i].HasProperty("_BaseColor")) mats[i].SetColor("_BaseColor", c);
+                    any = true;
+                }
+                if (any) r.materials = mats;
+            }
+        }
+        public static Color FPArmColor(Transform arms, string matName)   // 测试用：读手臂某个材质的当前颜色（找不到返回 FPArmsUnset）
+        {
+            if (arms == null) return FPArmsUnset;
+            foreach (var r in arms.GetComponentsInChildren<Renderer>(true))
+                foreach (var m in r.sharedMaterials)
+                {
+                    if (m == null) continue;
+                    string n = System.Text.RegularExpressions.Regex.Replace(m.name.Replace(" (Instance)", ""), @"\.\d+$", "");
+                    if (n == matName) return m.HasProperty("baseColorFactor") ? m.GetColor("baseColorFactor") : m.color;
+                }
+            return FPArmsUnset;
+        }
+
         public Fighter owner;
         Animator anim;
         Transform gun, body, chest;
         public Transform Body { get { return body; } }
+        public string ClipName { get { return clipPlayer != null ? clipPlayer.Current : ""; } }
+        // V21：外观最高点（相对脚底），只算显示中的模型 / 帽子 / 枪，不含粒子和拖尾
+        public float VisualTop()
+        {
+            var root = transform.parent != null ? transform.parent : transform; float top = float.MinValue;
+            foreach (var r in root.GetComponentsInChildren<Renderer>())
+                if (r.enabled && r.gameObject.activeInHierarchy && !(r is ParticleSystemRenderer) && !(r is TrailRenderer) && !(r is LineRenderer)) top = Mathf.Max(top, r.bounds.max.y);
+            return top - (owner != null ? owner.transform.position.y : root.position.y);
+        }
         GameObject teamRing, plate; bool vanished; readonly List<Renderer> hiddenOnDeath = new List<Renderer>();
         Vector3 muzzleLocal, foreLocal;
         GunParts parts; Renderer[] bodyRenderers; MaterialPropertyBlock mpb; float flashUntil2; Color teamEmission;
@@ -253,7 +297,7 @@ namespace NeonSiege
             ToonAssets.Recolor(model, Color.Lerp(team, Color.white, .1f), hero.tint);
             if (ch == "Character_Bean") ToonAssets.AddHat(model, hero.role, f.human ? Collection.EquippedHat : null);   // V17：豆子角色戴美食帽子
             var av = model.AddComponent<FighterAvatar>();
-            av.owner = f; av.body = root.transform; av.gltf = true; av.toon = true;
+            av.owner = f; av.body = root.transform; av.gltf = true; av.toon = true; av.toonScale = k;
             av.anim = model.GetComponentInChildren<Animator>();
             av.anim.applyRootMotion = false; av.anim.cullingMode = AnimatorCullingMode.AlwaysAnimate;
             av.clipPlayer = new ClipPlayer(av.anim, ClipPlayer.Load("Toon/Chars/" + ch), "Death", "HitReact", "Jump_Land", "Punch", "Wave");
@@ -297,6 +341,9 @@ namespace NeonSiege
             return av;
         }
 
+        public static readonly Vector3 ProneSquash = new Vector3(1.08f, .88f, 1.04f);
+        float toonScale;
+
         void UpdateToon()
         {
             clipPlayer.Tick(Time.deltaTime);
@@ -316,7 +363,9 @@ namespace NeonSiege
             if (v.magnitude > 20) v = Vector3.zero;
             float speed = v.magnitude, fwd = Vector3.Dot(v, owner.transform.forward);
             bool firing = owner.lastShotAt > Time.time - .25f;
-            if (owner.bombBusy || owner.usingInteract != null) clipPlayer.Play("Duck", .2f);
+            bool proneClip = owner.Prone && clipPlayer.Has("Prone");   // V21：真正的趴下 / 匍匐动作（Character_Bean.glb）
+            if (proneClip) clipPlayer.Play(speed > .3f && clipPlayer.Has("Prone_Crawl") ? "Prone_Crawl" : "Prone", .25f, speed > .3f ? Mathf.Clamp(speed / Mathf.Max(.1f, Tune.ProneSpeed), .6f, 1.5f) : 1f);
+            else if (owner.bombBusy || owner.usingInteract != null) clipPlayer.Play("Duck", .2f);
             else if (Time.time < owner.meleeUntil) clipPlayer.Play("Punch", .05f, 1.6f, true);
             else if (!owner.grounded && !owner.Mantling) clipPlayer.Play("Jump_Idle", .15f);
             else if (Time.time < hitUntil && speed < .5f) clipPlayer.Play("HitReact", .05f, 1.2f);
@@ -328,8 +377,10 @@ namespace NeonSiege
             }
             else if (owner.crouching || owner.Prone) clipPlayer.Play("Duck", .2f);
             else clipPlayer.Play("Idle_Shoot", .15f, firing ? 1f : .0001f);   // combat-ready: rifle up, frozen on the aim pose unless firing
-            body.localRotation = Quaternion.Slerp(body.localRotation, Quaternion.Euler(owner.Prone ? 72f : -flinch * 8f, 0, flinch * 4f), Time.deltaTime * 10f);
-            body.localPosition = Vector3.Lerp(body.localPosition, owner.Prone ? new Vector3(0, .25f, -.55f) : Vector3.zero, Time.deltaTime * 10f);   // V20：趴下姿态
+            bool oldProne = owner.Prone && !proneClip;   // 旧模型没有 Prone 动作时才用 V20 的"前倾 72°"
+            body.localRotation = Quaternion.Slerp(body.localRotation, Quaternion.Euler(oldProne ? 72f : -flinch * 8f, 0, flinch * 4f), Time.deltaTime * 10f);
+            body.localPosition = Vector3.Lerp(body.localPosition, oldProne ? new Vector3(0, .25f, -.55f) : Vector3.zero, Time.deltaTime * 10f);
+            if (toonScale > 0) transform.localScale = Vector3.Lerp(transform.localScale, (proneClip ? ProneSquash : Vector3.one) * toonScale, Time.deltaTime * 10f);   // 趴下时"摊成煎饼"：模型压扁一点（body 的缩放留给变大 / 蛋糕）
             flinch = Mathf.MoveTowards(flinch, 0, Time.deltaTime * 5f);
         }
 
@@ -481,6 +532,7 @@ namespace NeonSiege
             if (vanished) { foreach (var r in hiddenOnDeath) if (r != null) r.enabled = true; hiddenOnDeath.Clear(); vanished = false; }
             if (plate != null) Destroy(plate);
             deathT = -1; body.localRotation = Quaternion.identity; body.localPosition = Vector3.zero;
+            if (toonScale > 0) transform.localScale = Vector3.one * toonScale;
             if (anim != null) anim.speed = 1f;
             if (clipPlayer != null) clipPlayer.Play(fpsRig || toon ? "Idle" : "Idle_Gun", .01f, 1f, true);
             gameObject.SetActive(true);

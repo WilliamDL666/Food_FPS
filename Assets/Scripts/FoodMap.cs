@@ -60,7 +60,7 @@ namespace NeonSiege
             Fx.Burst(f.Chest, Vector3.up, new Color(1f, .6f, .75f), 18, 2.2f, .06f, .6f, .4f);
             Sfx.Play("food_popcorn", transform.position, .8f, .8f, 1f, 20f);
             Sfx.Play("confirmation", transform.position, .4f, 1.4f, 1f, 15f);
-            if (f.human) Fx.AddNumber(f.Chest + Vector3.up * .4f, Heal, false, false, false);
+            if (f.human) Fx.AddNumber(f.Chest + Vector3.up * .4f, heal, false, false, false);   // V21：飘字显示实际回血（猎隼 50）
         }
         public override void ResetRound() { base.ResetRound(); Show(true); }
     }
@@ -99,7 +99,13 @@ namespace NeonSiege
     public static class SteamCloud
     {
         static readonly List<Vector4> clouds = new List<Vector4>();   // xyz 中心, w 半径
-        public static void Clear() { clouds.Clear(); suppressedUntil = 0; particles.Clear(); }
+        // V22 第二期：蒸汽阀喷出的限时白雾（到时自动失效，回合重置清空）
+        static readonly List<Vector4> timed = new List<Vector4>(); static readonly List<float> timedUntil = new List<float>();
+        public static int AddTimed(Vector3 c, float r, float until) { timed.Add(new Vector4(c.x, c.y, c.z, r)); timedUntil.Add(until); return timed.Count - 1; }
+        public static void ExpireTimed(int id) { if (id >= 0 && id < timedUntil.Count) timedUntil[id] = 0; }   // V22 第三期：棉花糖蒸汽被冰淇淋吹散 / 提前结束
+        public static void ClearTimed() { timed.Clear(); timedUntil.Clear(); }
+        public static int TimedActive { get { int n = 0; foreach (var u in timedUntil) if (Time.time < u) n++; return n; } }
+        public static void Clear() { clouds.Clear(); suppressedUntil = 0; particles.Clear(); ClearTimed(); }
         static float suppressedUntil; public static readonly List<ParticleSystem> particles = new List<ParticleSystem>();
         public static bool Suppressed { get { return Time.time < suppressedUntil; } }
         // V18：冰淇淋给火锅降温，热气散开一段时间
@@ -114,14 +120,86 @@ namespace NeonSiege
         public static bool Blocks(Vector3 a, Vector3 b)
         {
             Tick(); if (Suppressed) return false;
-            foreach (var c in clouds)
-            {
-                Vector3 cc = c; Vector3 ab = b - a;
-                float t = Mathf.Clamp01(Vector3.Dot(cc - a, ab) / Mathf.Max(ab.sqrMagnitude, 1e-4f));
-                if (Vector3.Distance(a + ab * t, cc) < c.w * .8f) return true;
-            }
+            foreach (var c in clouds) if (Hits(c, a, b)) return true;
+            for (int i = 0; i < timed.Count; i++) if (Time.time < timedUntil[i] && Hits(timed[i], a, b)) return true;
             return false;
         }
+        static bool Hits(Vector4 c, Vector3 a, Vector3 b)
+        {
+            Vector3 cc = c; Vector3 ab = b - a;
+            float t = Mathf.Clamp01(Vector3.Dot(cc - a, ab) / Mathf.Max(ab.sqrMagnitude, 1e-4f));
+            return Vector3.Distance(a + ab * t, cc) < c.w * .8f;
+        }
+    }
+
+    // ---------------------------------------------------------------- V22 第二期：蒸汽阀（中庭 ×2、南后厨 ×1）
+    // 长按 G 0.5 s → 喷 6 s 白雾（挡视线，AI 也看不穿，子弹照样穿过），冷却 25 s，谁都能用。
+    // 外观：奶白茶壶 + 红色阀门轮（MAP-A2），喷气时阀门轮转、壶嘴冒蒸汽。
+    public class SteamValve : Interactable
+    {
+        public const float Duration = 6f, Cooldown = 25f, Radius = 3.4f, HoldSecs = .5f;
+        public static readonly List<SteamValve> Valves = new List<SteamValve>();
+        float activeUntil = -1, readyAt; ParticleSystem ps; Transform wheel; Light lamp;
+        public bool Active { get { return Time.time < activeUntil; } }
+        public float CooldownLeft { get { return Mathf.Max(0, readyAt - Time.time); } }
+        public Vector3 CloudCenter { get { return transform.position + Vector3.up * 1.8f; } }
+        protected override void OnEnable() { base.OnEnable(); Valves.Add(this); }
+        protected override void OnDisable() { base.OnDisable(); Valves.Remove(this); }
+
+        public void Build()
+        {
+            holdTime = HoldSecs; range = 2.2f;
+            Material M(Color c, float g) { var m = new Material(Shader.Find("Standard")); m.color = c; m.SetFloat("_Glossiness", g); return m; }
+            var cream = M(new Color(1f, .95f, .9f), .6f); var pink = M(new Color(1f, .6f, .7f), .5f); var red = M(new Color(.9f, .25f, .35f), .5f); var leaf = M(new Color(.45f, .75f, .55f), .4f);
+            GameObject Part(PrimitiveType t, Vector3 lp, Vector3 s, Material m, Transform parent = null)
+            {
+                var o = GameObject.CreatePrimitive(t); Arena.Kill(o.GetComponent<Collider>()); o.transform.SetParent(parent != null ? parent : transform, false);
+                o.transform.localPosition = lp; o.transform.localScale = s; o.GetComponent<Renderer>().sharedMaterial = m; return o;
+            }
+            Part(PrimitiveType.Cylinder, new Vector3(0, .08f, 0), new Vector3(1.3f, .08f, 1.3f), pink);                    // 底座
+            Part(PrimitiveType.Sphere, new Vector3(0, .62f, 0), new Vector3(1.05f, .95f, 1.05f), cream);                   // 壶身
+            Part(PrimitiveType.Cylinder, new Vector3(0, 1.08f, 0), new Vector3(.45f, .08f, .45f), cream);                  // 壶盖
+            Part(PrimitiveType.Sphere, new Vector3(0, .62f, .5f), new Vector3(.32f, .38f, .05f), leaf);                    // 叶子标
+            var spout = Part(PrimitiveType.Cylinder, new Vector3(.62f, .78f, 0), new Vector3(.16f, .28f, .16f), cream); spout.transform.localRotation = Quaternion.Euler(0, 0, -55);
+            Part(PrimitiveType.Cylinder, new Vector3(0, 1.22f, 0), new Vector3(.07f, .14f, .07f), red);                    // 阀杆
+            wheel = new GameObject("阀门轮").transform; wheel.SetParent(transform, false); wheel.localPosition = new Vector3(0, 1.38f, 0);
+            Part(PrimitiveType.Cylinder, Vector3.zero, new Vector3(.62f, .03f, .62f), red, wheel);
+            for (int i = 0; i < 2; i++) { var sp = Part(PrimitiveType.Cube, Vector3.zero, new Vector3(.62f, .05f, .07f), red, wheel); sp.transform.localRotation = Quaternion.Euler(0, i * 90, 0); }
+            var cap = gameObject.AddComponent<CapsuleCollider>(); cap.radius = .55f; cap.height = 1.45f; cap.center = new Vector3(0, .72f, 0);
+            var go = new GameObject("蒸汽"); go.transform.SetParent(transform, false); go.transform.localPosition = new Vector3(.75f, 1f, 0);
+            ps = go.AddComponent<ParticleSystem>();
+            var main = ps.main; main.startLifetime = 2.6f; main.startSpeed = new ParticleSystem.MinMaxCurve(1.5f, 3f); main.startSize = new ParticleSystem.MinMaxCurve(2f, 4f);
+            main.startColor = new Color(1f, 1f, 1f, .75f); main.maxParticles = 220; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.05f;
+            var em = ps.emission; em.rateOverTime = 40; em.enabled = false;
+            var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Sphere; sh.radius = .6f;
+            var col = ps.colorOverLifetime; col.enabled = true;
+            var g = new Gradient(); g.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) }, new[] { new GradientAlphaKey(0, 0), new GradientAlphaKey(1, .15f), new GradientAlphaKey(.8f, .7f), new GradientAlphaKey(0, 1) }); col.color = g;
+            go.GetComponent<ParticleSystemRenderer>().material = Resources.Load<Material>("Materials/FxSmoke") ?? Fx.Additive;
+            lamp = new GameObject("蒸汽阀灯").AddComponent<Light>(); lamp.transform.SetParent(transform, false); lamp.transform.localPosition = new Vector3(0, 1.6f, 0);
+            lamp.color = new Color(1f, .55f, .6f); lamp.range = 3f; lamp.intensity = 1f;
+        }
+
+        public override bool Usable(Fighter f) { return f != null && f.alive && Time.time >= readyAt; }
+        public override string Prompt(Fighter f) { return "按住 G 拧开蒸汽阀（白雾挡视线 6 秒）"; }
+        public override Vector3 Anchor { get { return transform.position + Vector3.up * 1f; } }
+        protected override void OnStart(Fighter f) { Sfx.Play("switch", transform.position, .6f, 1.3f, 1f, 20f); }
+        protected override void Complete(Fighter f) { Fire(f); }
+        public void Fire(Fighter f)
+        {
+            activeUntil = Time.time + Duration; readyAt = Time.time + Cooldown;
+            SteamCloud.AddTimed(CloudCenter, Radius, activeUntil);
+            var em = ps.emission; em.enabled = true;
+            Sfx.Play("thrusterFire", transform.position, .9f, .6f, 1f, 40f);
+            if (Match.I != null) { Match.I.OnValve(); Match.I.NoiseAt(f, transform.position); if (f != null) Match.I.Feed(Config.TeamName(f.team) + " " + f.Hero.name + " 拧开了蒸汽阀", new Color(.85f, .9f, 1f)); }
+        }
+        void Update()
+        {
+            bool on = Active;
+            if (wheel != null && on) wheel.Rotate(0, 360f * Time.deltaTime, 0, Space.Self);
+            if (ps != null && !on) { var em = ps.emission; if (em.enabled) em.enabled = false; }
+            if (lamp != null) lamp.intensity = on ? 2.2f : CooldownLeft > 0 ? .3f : 1f;
+        }
+        public override void ResetRound() { base.ResetRound(); activeUntil = -1; readyAt = 0; if (ps != null) { var em = ps.emission; em.enabled = false; ps.Clear(); } }
     }
 
     // 站进火锅里会被烫
@@ -129,6 +207,10 @@ namespace NeonSiege
     {
         public float radius = 1.25f, height = .6f, dps = 12f;
         readonly Dictionary<Fighter, float> tick = new Dictionary<Fighter, float>();
+        public static readonly List<HotpotHazard> All = new List<HotpotHazard>();   // V22 第三期：芥末辣锅 / 棉花糖蒸汽的联动点
+        void OnEnable() { All.Add(this); }
+        void OnDisable() { All.Remove(this); }
+        public Vector3 SteamCenter { get { return transform.position + Vector3.up * 1.8f; } }
         void Update()
         {
             if (Match.I == null) return;
@@ -139,7 +221,7 @@ namespace NeonSiege
                 if (d.y < height || d.y > height + 1f || new Vector2(d.x, d.z).magnitude > radius) continue;
                 if (tick.TryGetValue(f, out float t) && Time.time < t) continue;
                 tick[f] = Time.time + .25f;
-                f.ReceiveDamage(dps * .25f, null, transform.position, false);
+                DamageCtx.Set(DamageKind.Env, "火锅烫伤"); f.ReceiveDamage(dps * .25f, null, transform.position, false);
                 Fx.Burst(f.transform.position + Vector3.up * .3f, Vector3.up, new Color(1f, .35f, .2f), 6, 2f, .06f, .4f, -.2f);
                 if (f.human) { Fx.AddNumber(f.Chest, dps * .25f, false, false, false); Sfx.Ui("food_squish", .4f, 1.4f); }
             }

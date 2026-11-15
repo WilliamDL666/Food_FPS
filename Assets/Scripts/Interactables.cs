@@ -58,30 +58,57 @@ namespace NeonSiege
     }
 
     // ---------------------------------------------------------------- 卷帘门：E 切换开关（2 s，有噪音），双方都可用
+    // V22 第二期：检查站铁门 → 蒸笼门（gate=true）：默认开着（三层蒸笼升到门楣上方），守方长按 G 2.0 s 盖上（巨响），
+    // 任何人长按 G 1.2 s 掀开；关着时有碰撞 + 寻路障碍（NavMeshObstacle 挖洞），开着时都关掉，NavMesh 同步。
     public class Shutter : Interactable
     {
-        public bool open; float t = 1; Transform slab; NavMeshObstacle obstacle; BoxCollider col; float width, height;
-        public bool gate;   // V7：检查站铁门 —— 横向滑开，开启更慢、声音更大，是长街唯一通路
-        public string Kind { get { return gate ? "铁门" : "卷帘门"; } }
+        public bool open; float t = 1; Transform slab, lever; NavMeshObstacle obstacle; BoxCollider col; float width, height;
+        public bool gate;
+        public const float GateCloseHold = 2.0f, GateOpenHold = 1.2f, GateMoveTime = 1.6f;
+        public string Kind { get { return gate ? "蒸笼门" : "卷帘门"; } }
+        public float Width { get { return width; } }
+        public float Height { get { return height; } }
+        public bool Moving { get { return t < 1f; } }   // V22 第三期：门框联动只在完全开着时生效
+        // 爆破模式只有守方能盖上蒸笼门；其他模式谁都能关
+        public static bool CanClose(Fighter f) { return Match.I == null || Match.Mode != GameMode.Bomb || f == null || f.team == Match.I.DefendingTeam; }
         public void BuildGate(float w, float h, Material frame)
         {
-            gate = true; width = w; height = h; holdTime = 2.4f; range = 3f;
-            col = gameObject.AddComponent<BoxCollider>(); col.size = new Vector3(w, h, .3f); col.center = new Vector3(0, h / 2, 0);
+            gate = true; width = w; height = h; holdTime = GateOpenHold; range = 3f;
+            col = gameObject.AddComponent<BoxCollider>(); col.size = new Vector3(w, h, .5f); col.center = new Vector3(0, h / 2, 0);
             obstacle = gameObject.AddComponent<NavMeshObstacle>(); obstacle.shape = NavMeshObstacleShape.Box; obstacle.size = col.size; obstacle.center = col.center; obstacle.carving = true;
-            slab = new GameObject("铁门门扇").transform; slab.SetParent(transform, false);
-            var model = Arena.Model("PH/large_iron_gate/large_iron_gate");
-            if (model != null) { Arena.Fit(model, new Vector3(w, h, 0)); model.transform.SetParent(slab, false); }
-            else
+            Material M(Color c, float g) { var m = new Material(Shader.Find("Standard")); m.color = c; m.SetFloat("_Glossiness", g); return m; }
+            var bamboo = M(new Color(.9f, .72f, .45f), .3f); var rim = M(new Color(.7f, .5f, .28f), .25f); var bun = M(new Color(1f, .96f, .9f), .45f);
+            var red = M(new Color(.85f, .25f, .3f), .45f); var pillar = M(new Color(.95f, .82f, .6f), .3f);
+            slab = new GameObject("蒸笼门扇").transform; slab.SetParent(transform, false);
+            float tier = h / 3f;
+            for (int i = 0; i < 3; i++)
             {
-                Cube(slab, new Vector3(0, h / 2, 0), new Vector3(w, h, .12f), frame);
+                // 压扁的竹蒸笼：椭圆柱（宽 = 门宽，厚 0.9 m），上下各一圈深色竹圈，正面一个小包子图案
+                var c = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Arena.Kill(c.GetComponent<Collider>()); c.name = "蒸笼";
+                c.transform.SetParent(slab, false); c.transform.localPosition = new Vector3(0, tier * (i + .5f), 0); c.transform.localScale = new Vector3(w, tier * .47f, .9f);
+                c.GetComponent<Renderer>().sharedMaterial = bamboo;
+                foreach (float yy in new[] { .06f, tier - .06f })
+                {
+                    var r = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Arena.Kill(r.GetComponent<Collider>()); r.name = "蒸笼竹圈";
+                    r.transform.SetParent(slab, false); r.transform.localPosition = new Vector3(0, tier * i + yy, 0); r.transform.localScale = new Vector3(w + .06f, .06f, .96f);
+                    r.GetComponent<Renderer>().sharedMaterial = rim;
+                }
+                foreach (float side in new[] { 1f, -1f })
+                {
+                    var b = GameObject.CreatePrimitive(PrimitiveType.Sphere); Arena.Kill(b.GetComponent<Collider>()); b.name = "包子图案";
+                    b.transform.SetParent(slab, false); b.transform.localPosition = new Vector3(0, tier * (i + .5f), side * .43f); b.transform.localScale = new Vector3(.55f, .4f, .12f);
+                    b.GetComponent<Renderer>().sharedMaterial = bun;
+                }
             }
-            // heavy steel frame + rail, warning lamp
-            Cube(slab, new Vector3(0, h - .1f, 0), new Vector3(w, .2f, .2f), frame);
-            Cube(slab, new Vector3(0, .15f, 0), new Vector3(w, .3f, .2f), frame);
-            for (int i = 0; i <= 6; i++) Cube(slab, new Vector3(-w / 2 + i * w / 6f, h / 2, 0), new Vector3(.09f, h, .09f), frame);
-            Cube(transform, new Vector3(w / 2, .03f, 0), new Vector3(w * 2.1f, .06f, .25f), frame);   // floor rail
-            Cube(transform, new Vector3(-w / 2 - .2f, h / 2 + .3f, 0), new Vector3(.4f, h + .6f, .5f), frame);
-            Cube(transform, new Vector3(-w / 2 - .2f, h + .75f, .3f), new Vector3(.3f, .2f, .1f), Arena.Glow(new Color(1f, .25f, .1f), 3f));
+            Cube(slab, new Vector3(0, h + .12f, 0), new Vector3(1.2f, .14f, .14f), rim);   // 提手
+            // 两侧立柱（只有外观，墙本身有碰撞）
+            foreach (float s in new[] { 1f, -1f }) Cube(transform, new Vector3(s * (w / 2 + .3f), (h + .9f) / 2, 0), new Vector3(.55f, h + .9f, 1f), pillar);
+            // 筷子拉杆：开着时竖起，关上时倒下（MAP-A5）
+            Cube(transform, new Vector3(w / 2 + .3f, 1.1f, .62f), new Vector3(.5f, .6f, .25f), red);
+            lever = new GameObject("筷子拉杆").transform; lever.SetParent(transform, false); lever.localPosition = new Vector3(w / 2 + .3f, 1.35f, .78f);
+            foreach (float dx in new[] { -.07f, .07f }) Cube(lever, new Vector3(dx, .7f, 0), new Vector3(.07f, 1.4f, .07f), red);
+            Cube(transform, new Vector3(w / 2 + .3f, h + 1.0f, .55f), new Vector3(.3f, .2f, .1f), Arena.Glow(new Color(1f, .7f, .3f), 3f));
+            open = true; t = 1; Apply(1);
         }
         public void Build(float w, float h, Material frame)
         {
@@ -101,34 +128,49 @@ namespace NeonSiege
             Cube(transform, new Vector3(w / 2 + .12f, h / 2, 0), new Vector3(.24f, h, .4f), frame);
             Cube(transform, new Vector3(0, h + .04f, .32f), new Vector3(w * .6f, .06f, .04f), Arena.Glow(new Color(1f, .55f, .1f), 2.5f));
         }
-        public override bool Usable(Fighter f) { return t >= 1f; }
+        protected override void OnStart(Fighter f)
+        {
+            if (gate) Sfx.Play("food_dumpling", transform.position, .35f, .8f, 1f, 15f);   // 蒸笼门：轻轻的竹子摩擦声，不再是电脑噪音
+            else base.OnStart(f);
+        }
+        public override bool Usable(Fighter f)
+        {
+            if (t < 1f) return false;
+            if (!gate) return true;
+            holdTime = open ? GateCloseHold : GateOpenHold;
+            return !open || CanClose(f);
+        }
         public override string Prompt(Fighter f)
         {
-            if (gate) return open ? "按住 G 关闭铁门" : "按住 G 开启铁门（2.4 秒 · 巨响，全图可闻）";
+            if (gate) return open ? "按住 G 盖上蒸笼门（2 秒 · 巨响，全图可闻）" : "按住 G 掀开蒸笼门（1.2 秒）";
             return open ? "按住 G 放下卷帘门" : "按住 G 升起卷帘门（会发出噪音）";
         }
         public override Vector3 Anchor { get { return transform.position + Vector3.up * .9f; } }
-        protected override void Complete(Fighter f) { SetOpen(!open); f.stats.doorsOpened++; if (Match.I != null) Match.I.Feed(Config.TeamName(f.team) + " " + f.Hero.name + (gate ? (open ? " 打开了" : " 关上了") : (open ? " 升起了" : " 放下了")) + name); }
+        protected override void Complete(Fighter f) { SetOpen(!open); f.stats.doorsOpened++; if (Match.I != null) Match.I.Feed(Config.TeamName(f.team) + " " + f.Hero.name + (gate ? (open ? " 掀开了" : " 盖上了") : (open ? " 升起了" : " 放下了")) + name); }
         public void SetOpen(bool o)
         {
             open = o; t = 0;
             if (Match.I != null && Match.I.phase == Phase.Live) Debug.Log("NEON_DOOR r" + Match.I.round + " " + name + " open=" + o);
-            Sfx.Play("engineCircular", transform.position, 1f, gate ? .5f : .7f, 1f, gate ? 120f : 50f);
-            if (gate) Sfx.Play("impactMetal", transform.position, 1f, .5f, 1f, 120f);
+            if (gate && Match.I != null) Match.I.OnGate(o);
+            // V22：蒸笼门不再用电子 / 金属音，改成竹蒸笼的木头闷响 + 蒸汽嘶声；盖上仍然远处可闻（守方关门是情报），但音量降低
+            if (gate) { Sfx.Play("food_bonk", transform.position, o ? .45f : .65f, o ? .8f : .6f, 1f, o ? 40f : 90f); Sfx.Play("food_fizz", transform.position, .35f, .7f, 1f, o ? 25f : 45f); }
+            else Sfx.Play("engineCircular", transform.position, 1f, .7f, 1f, 50f);
+            if (gate) Fx.Burst(transform.position + Vector3.up * (height + .5f), Vector3.up, new Color(1f, 1f, 1f, .7f), 24, 2.5f, .5f, 1.4f, -.2f, Fx.Smoke);
             if (Match.I != null) Match.I.NoiseAt(null, transform.position);
         }
-        public override void ResetRound() { base.ResetRound(); open = false; t = 1; Apply(0); }
+        public override void ResetRound() { base.ResetRound(); open = gate; t = 1; Apply(open ? 1 : 0); }   // 蒸笼门每回合开着，卷帘门关着
         void Apply(float k)
         {
-            if (slab != null && gate) slab.localPosition = new Vector3(k * (width + .2f), 0, 0);   // slides into the wall pocket
+            if (slab != null && gate) slab.localPosition = new Vector3(0, k * (height + .9f), 0);   // 蒸笼整体升到门楣上方
             else if (slab != null) { slab.localPosition = new Vector3(0, k * (height - .3f), 0); slab.localScale = new Vector3(1, Mathf.Max(.1f, 1 - k * .88f), 1); }
+            if (lever != null) lever.localRotation = Quaternion.Euler(0, 0, (1 - k) * -75f);
             bool blocking = k < .6f;
             col.enabled = blocking; obstacle.enabled = blocking;
         }
         void Update()
         {
             if (t >= 1f) return;
-            t = Mathf.Min(1f, t + Time.deltaTime / (gate ? 2.2f : 1.8f));
+            t = Mathf.Min(1f, t + Time.deltaTime / (gate ? GateMoveTime : 1.8f));
             Apply(open ? t : 1 - t);
         }
     }
@@ -299,7 +341,7 @@ namespace NeonSiege
                 {
                     if (!f.alive) continue;
                     float d = Vector3.Distance(f.Chest, p);
-                    if (d < 5f && Skills.LineClear(p, f.Chest, f)) f.ReceiveDamage(70f * (1 - d / 6f), lastHitter, p, false, true);
+                    if (d < 5f && Skills.LineClear(p, f.Chest, f)) { DamageCtx.Set(DamageKind.Env, "爆炸桶"); f.ReceiveDamage(70f * (1 - d / 6f), lastHitter, p, false, true); }
                 }
                 Match.I.NoiseAt(lastHitter, p);
             }
@@ -427,6 +469,13 @@ namespace NeonSiege
             transform.rotation = Quaternion.LookRotation(flat.sqrMagnitude > .01f ? flat : Vector3.forward);
         }
         readonly Dictionary<Fighter, float> cooldown = new Dictionary<Fighter, float>();
+        readonly Dictionary<Fighter, Vector3> prevPos = new Dictionary<Fighter, Vector3>();
+        public static readonly List<JumpPad> All = new List<JumpPad>();   // V22 第三期：可乐弹射联动点
+        public static bool TestAllowBots;   // 测试 / 截图用：让脚本控制的 AI 也能踩弹射板
+        public static Fighter LastLaunched; public static Vector3 LastLaunchPos; public static float LastLaunchAt = -9; public static bool LastWasCola;
+        void OnEnable() { All.Add(this); }
+        void OnDisable() { All.Remove(this); }
+        public Vector3 WorldLaunch { get { return worldLaunch ? launch : transform.TransformDirection(launch); } }
         Transform ring;
         public void Build(Color c)
         {
@@ -470,15 +519,30 @@ namespace NeonSiege
             if (Match.I == null) return;
             foreach (var f in Match.I.fighters)
             {
-                if (!f.alive || !f.grounded) continue;
-                Vector3 d = f.transform.position - transform.position; d.y = 0;
-                if (d.magnitude > .9f || Mathf.Abs(f.transform.position.y - transform.position.y) > .5f) continue;
+                Vector3 fp = f.transform.position;
+                bool hadPrev = prevPos.TryGetValue(f, out Vector3 pp); prevPos[f] = fp;
+                if (!f.alive) continue;
+                // V22 第三期：猎隼汽水冲刺中（或结束 DashPadWindow 秒内）踩到弹射板 → 可乐弹射。冲刺 50 m/s 一帧可能跨过弹床，按上一帧到这一帧的线段判定
+                bool cola = f.role == Role.Falcon && Skills.InDashWindow(f);
+                if (cola)
+                {
+                    if (Links.SegFlatDist(hadPrev ? pp : fp, fp, transform.position) > 1.15f || Mathf.Abs(fp.y - transform.position.y) > .9f) continue;
+                }
+                else
+                {
+                    if (!f.grounded) continue;
+                    Vector3 d = fp - transform.position; d.y = 0;
+                    if (d.magnitude > .9f || Mathf.Abs(fp.y - transform.position.y) > .5f) continue;
+                }
                 if (cooldown.TryGetValue(f, out float t) && Time.time < t) continue;
                 // AI only uses a pad when it is heading for that sniper nest (otherwise it gets stranded on rooftops)
-                if (!f.human && (!f.TryGetComponent(out Bot bot) || !bot.WantsPad)) continue;
-                if (Match.I.autoplay) Debug.Log("NEON_PAD r" + Match.I.round + " " + name + " " + f.Hero.name);
+                if (!f.human && !TestAllowBots && (!f.TryGetComponent(out Bot bot) || !bot.WantsPad || cola)) continue;
+                if (Match.I.autoplay) Debug.Log("NEON_PAD r" + Match.I.round + " " + name + " " + f.Hero.name + (cola ? " cola" : ""));
                 cooldown[f] = Time.time + 1f;
-                f.Launch(worldLaunch ? launch : transform.TransformDirection(launch));
+                Vector3 v = WorldLaunch;
+                if (cola) v = Links.ColaLaunch(f, this, v);
+                LastLaunched = f; LastLaunchPos = f.transform.position; LastLaunchAt = Time.time; LastWasCola = cola;
+                f.Launch(v);
                 Fx.Burst(transform.position + Vector3.up * .2f, Vector3.up, new Color(.4f, .9f, 1f), 30, 6, .1f, .5f, 0);
                 if (jellyRoot != null) { wobbleT = 0; Sfx.Play("food_boing", transform.position, 1f, Random.Range(.95f, 1.05f), 1f, 35f); }
                 else Sfx.Play("thrusterFire", transform.position, 1f, 1.4f, 1f, 35f);
@@ -546,14 +610,16 @@ namespace NeonSiege
         public readonly List<WallPiece> pieces = new List<WallPiece>();
         public Material[] layers;   // V17：按行换材质 = 一层层的蛋糕
         readonly List<NavMeshObstacle> columns = new List<NavMeshObstacle>();
-        int nx, ny; float thick;
+        int nx, ny; float thick, cw = Cell, chh = Cell;
+        public float Width { get; private set; }
+        public float Height { get; private set; }
         public int Broken { get { int n = 0; foreach (var p in pieces) if (!p.Alive) n++; return n; } }
 
         public void Build(float width, float height, float thickness, Material mat)
         {
             thick = thickness;
             nx = Mathf.Max(1, Mathf.RoundToInt(width / Cell)); ny = Mathf.Max(1, Mathf.RoundToInt(height / Cell));
-            float cw = width / nx, chh = height / ny;
+            cw = width / nx; chh = height / ny; Width = width; Height = height;
             for (int iy = 0; iy < ny; iy++)
                 for (int ix = 0; ix < nx; ix++)
                 {
@@ -580,12 +646,14 @@ namespace NeonSiege
                 t.transform.localPosition = new Vector3(0, Mathf.Min(height - .3f, 2.4f), side * (thickness / 2 + .02f));
                 t.transform.localRotation = Quaternion.Euler(0, side > 0 ? 180 : 0, 0);
                 var font = Resources.Load<Font>("NotoSansSC"); t.font = font; if (font != null) t.GetComponent<MeshRenderer>().sharedMaterial = Arena.WorldText(font);
-                t.text = layers != null ? "蛋糕墙 · 可以打穿 / 炸开" : "▧ 薄墙 · 可击穿 / 炸开"; t.anchor = TextAnchor.MiddleCenter; t.fontSize = 64; t.characterSize = .04f; t.color = new Color(1f, .75f, .3f, .8f);
+                t.text = layers != null ? "蛋糕墙 · 可以打穿 / 炸开\n奶油裱花（BR-5）打它是补墙" : "▧ 薄墙 · 可击穿 / 炸开"; t.anchor = TextAnchor.MiddleCenter; t.fontSize = 64; t.characterSize = .04f; t.color = new Color(1f, .75f, .3f, .8f);   // V21：补上 BR-5 补墙说明
             }
         }
 
+        public void Invalidate() { openFrame = -1; }   // V22 第三期：墙块碎 / 补回时，破口缓存作废
         public void OnPieceBroken(WallPiece p)
         {
+            openFrame = -1;
             // an unsupported piece above a hole falls too (no floating plaster)
             foreach (var q in pieces) if (q.Alive && q.ix == p.ix && q.iy == p.iy + 1 && Random.value < .5f) { q.Break(null); break; }
             int cols = columns.Count;
@@ -597,6 +665,25 @@ namespace NeonSiege
                     if (q.ix >= Mathf.FloorToInt(x0) && q.ix < Mathf.CeilToInt(x1) && q.iy * Cell < 2f && q.Alive) { open = false; break; }
                 if (open) columns[c].enabled = false;
             }
+        }
+
+        // V22 第三期：当前最大的"能过人的破口"（离地 2 m 以内整列都碎了、连续 ≥ 1 m 宽）。开局完整的墙返回 null（铆钉只能补被打出来的洞）
+        int openFrame = -1; Links.Breach openCache;
+        public Links.Breach Opening()
+        {
+            if (openFrame == Time.frameCount) return openCache;
+            openFrame = Time.frameCount; openCache = null;
+            var open = new bool[nx];
+            for (int ix = 0; ix < nx; ix++) open[ix] = true;
+            foreach (var q in pieces) if (q.Alive && q.iy * chh < 1.95f) open[q.ix] = false;
+            int bestS = -1, bestN = 0, s = 0, n = 0;
+            for (int ix = 0; ix < nx; ix++) { if (open[ix]) { if (n == 0) s = ix; n++; if (n > bestN) { bestN = n; bestS = s; } } else n = 0; }
+            if (bestN * cw < .95f) return null;
+            float top = Height;
+            foreach (var q in pieces) if (q.Alive && q.ix >= bestS && q.ix < bestS + bestN && q.iy * chh >= 1.95f) top = Mathf.Min(top, q.iy * chh);
+            float lx = -Width / 2 + cw * (bestS + bestN / 2f);
+            openCache = new Links.Breach { key = this, wall = this, center = transform.TransformPoint(new Vector3(lx, 0, 0)), rot = transform.rotation, width = bestN * cw, height = Mathf.Max(2f, top) };
+            return openCache;
         }
 
         // V18：奶油补墙 —— 补回一块和它相邻的、已经被打掉的蛋糕块
@@ -612,6 +699,7 @@ namespace NeonSiege
 
         public void ResetRound()
         {
+            openFrame = -1;
             foreach (var p in pieces) p.Restore();
             foreach (var c in columns) c.enabled = true;
         }
@@ -645,6 +733,6 @@ namespace NeonSiege
             Sfx.Play(wall != null && wall.layers != null ? "food_splat" : "hit_concrete", transform.position, .7f, .7f, 1f, 35f);
             if (wall != null) wall.OnPieceBroken(this);
         }
-        public void Restore() { hp = BreakWall.PieceHp; GetComponent<Renderer>().enabled = true; GetComponent<Collider>().enabled = true; }
+        public void Restore() { hp = BreakWall.PieceHp; GetComponent<Renderer>().enabled = true; GetComponent<Collider>().enabled = true; if (wall != null) wall.Invalidate(); }
     }
 }

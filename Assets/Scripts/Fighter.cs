@@ -7,14 +7,16 @@ namespace NeonSiege
     {
         public int kills, deaths, assists, headshots, shots, hits, skillUses, skillEffective, doorsOpened, coverDestroyed, plants, defuses;
         public int chestHits, stomachHits, armHits, legHits, pierced;   // V20：部位命中、穿墙命中
+        public int swallowedShots, exhaustCount;   // V22：冲刺转开火等待中按开火（吞键）次数、体力耗尽次数
         public float damage, captureTime, armorDamage;
-        public void Clear() { kills = deaths = assists = headshots = shots = hits = skillUses = skillEffective = doorsOpened = coverDestroyed = plants = defuses = 0; chestHits = stomachHits = armHits = legHits = pierced = 0; damage = captureTime = armorDamage = 0; }
+        public void Clear() { kills = deaths = assists = headshots = shots = hits = skillUses = skillEffective = doorsOpened = coverDestroyed = plants = defuses = 0; chestHits = stomachHits = armHits = legHits = pierced = 0; swallowedShots = exhaustCount = 0; damage = captureTime = armorDamage = 0; }
         public void Add(Stats o)
         {
             kills += o.kills; deaths += o.deaths; assists += o.assists; headshots += o.headshots; shots += o.shots; hits += o.hits;
             skillUses += o.skillUses; skillEffective += o.skillEffective; doorsOpened += o.doorsOpened; coverDestroyed += o.coverDestroyed;
             plants += o.plants; defuses += o.defuses; damage += o.damage; captureTime += o.captureTime;
             chestHits += o.chestHits; stomachHits += o.stomachHits; armHits += o.armHits; legHits += o.legHits; pierced += o.pierced; armorDamage += o.armorDamage;
+            swallowedShots += o.swallowedShots; exhaustCount += o.exhaustCount;
         }
     }
 
@@ -64,6 +66,35 @@ namespace NeonSiege
         public float stamina = 100f; public bool exhausted, prone; public float adsK;
         float staminaUsedAt, sprintEndedAt = -9, drawUntil, proneChangeUntil, jumpBufferedAt = -9, lastGroundedAt = -9, reloadDuration = 2f; bool wasSprinting;
         public readonly List<HitRecord> damageLog = new List<HitRecord>();
+        // V22 第一期（只改表现）：状态带 / 冲刺转开火 / 死亡回顾要读的状态
+        public float staminaFullAt = -100f, staminaRecoveredAt = -100f, exhaustedAt = -100f, swallowedAt = -100f, fireRevealUntil;
+        bool staminaWasFull = true; float proneChangeAt = -100f, proneCamFrom = 1.62f, sprintPose; Vector3 viewExtra; Quaternion viewExtraRot = Quaternion.identity;
+        public Fighter recapKiller; public float recapKillerHp, recapKillerArmor, recapDealt;
+        public bool scripted;   // 测试用：玩家角色也读 bot* 输入（不读键鼠）
+        public float StaminaUsedAt { get { return staminaUsedAt; } }
+        public float SprintEndedAt { get { return sprintEndedAt; } }
+        // 冲刺转开火的抬枪进度：冲刺结束后在本枪 sprintToFire 秒内从 0 走到 1
+        public float SprintRaiseK { get { return sprinting ? 0f : W.sprintToFire <= 0f ? 1f : Mathf.Clamp01((Time.time - sprintEndedAt) / W.sprintToFire); } }
+        // 所有"不能开火"等待里最慢的那一个的进度（冲刺转开火 / 拔枪 / 趴下切换），CanFireNow 为真时 = 1
+        public float FireReadyK
+        {
+            get
+            {
+                if (CanFireNow) return 1f;
+                if (sprinting) return 0f;
+                float k = SprintRaiseK;
+                if (Time.time < drawUntil) k = Mathf.Min(k, 1f - (drawUntil - Time.time) / Mathf.Max(.05f, W.drawTime));
+                if (Time.time < proneChangeUntil) k = Mathf.Min(k, ProneChangeK);
+                return Mathf.Clamp01(k);
+            }
+        }
+        public float ProneChangeK { get { return Time.time >= proneChangeUntil ? 1f : Mathf.Clamp01(1f - (proneChangeUntil - Time.time) / Mathf.Max(.01f, Tune.ProneTransition)); } }
+        public float ViewSprintPose { get { return sprintPose; } }
+        public Vector3 ViewPivotLocal { get { return viewPivot != null ? viewPivot.localPosition : Vector3.zero; } }
+        public Vector3 ViewAdsLocal { get { return viewAds; } }
+        public bool HasViewModel { get { return viewPivot != null; } }
+        // 只因为站在焦糖火里而暴露（芥末签 / 夜鸦被动 / 大招等其它来源延长了暴露时间时为 false）
+        public bool RevealedByFireOnly { get { return Revealed && fireRevealUntil >= revealedUntil - .001f; } }
         public bool Prone { get { return prone; } }
         public string MoveStateName { get { return !alive ? "阵亡" : mantling ? "翻越" : Sliding ? "滑铲" : !grounded ? "空中" : prone ? "趴下" : crouching ? "蹲下" : sprinting ? "冲刺" : aiming ? "开镜" : new Vector2(velocity.x, velocity.z).magnitude > .5f ? "行走" : "站立"; } }
         public bool leanHeadHit(Vector3 p) { return leanHead != null && leanHead.enabled && Vector3.Distance(p, leanHead.transform.position) < leanHead.radius + .05f || headBox != null && headBox.enabled && Vector3.Distance(p, headBox.transform.position) < headBox.radius + .03f && p.y > headBox.transform.position.y - .1f; }
@@ -71,10 +102,22 @@ namespace NeonSiege
         public void SetProne(bool on)
         {
             if (prone == on) return;
-            if (!on && Physics.SphereCast(transform.position + Vector3.up * .4f, .3f, Vector3.up, out _, 1.4f, ~0, QueryTriggerInteraction.Ignore)) return;   // 头顶没空间站不起来
+            if (!on && CeilingBlocked(.4f, 1.4f)) return;   // 头顶没空间站不起来
             prone = on; proneChangeUntil = Time.time + Tune.ProneTransition;
+            proneChangeAt = Time.time; proneCamFrom = cam != null && human ? cam.transform.localPosition.y : camHeight;   // V22：镜头按规则时长过渡
             if (on) { crouching = false; cc.height = .7f; cc.center = new Vector3(0, .35f, 0); }
             else SetHeight(false);
+        }
+        // 头顶净空检查。V22 修：忽略自己身上的碰撞体 —— 头部判定球（头部判定 / 探头判定）挡住了这条射线，蹲下后永远站不起来、也就不能冲刺
+        bool CeilingBlocked(float fromY, float dist)
+        {
+            foreach (var h in Physics.SphereCastAll(transform.position + Vector3.up * fromY, .3f, Vector3.up, dist, ~0, QueryTriggerInteraction.Ignore))
+            {
+                if (h.distance <= 0f && h.point == Vector3.zero) continue;   // 起点就重叠的（和 SphereCast 的规则一致）
+                if (h.collider.transform.IsChildOf(transform)) continue;
+                return true;
+            }
+            return false;
         }
         public FoodState Food { get { if (food == null) { food = GetComponent<FoodState>() ?? gameObject.AddComponent<FoodState>(); food.f = this; } return food; } }
         public bool FoodAim { get { return ToonAssets.Available && aiming && adsK > .85f; } }
@@ -85,7 +128,9 @@ namespace NeonSiege
         public Fighter lastVictim; public bool lastKillHead; public int roundKills; public float hitPunchAt = -10;
         public float lastShotAt = -10f, lastSeenByEnemyAt = -10f;
         public float shieldActiveUntil, dashUntil, aimRecoveryUntil;
+        public Vector3 lastDashDir = Vector3.forward;   // V22 第三期：可乐弹射沿冲刺方向飞
         public Interactable usingInteract;
+        public bool UseHeld;   // V21：本帧是否按住 G（食材"按住才捡"用）
         public bool bombBusy;            // planting / defusing — locks movement
         public string routeName = "";
         public readonly Dictionary<Fighter, float> damagedBy = new Dictionary<Fighter, float>();
@@ -210,6 +255,7 @@ namespace NeonSiege
             viewGun = GunModel.Create(W, out viewParts, Hero.tint, true);
             viewGun.SetParent(viewPivot, false);
             var vAnim = viewGun.GetComponent<FoodGunAnim>(); if (vAnim != null) vAnim.owner = this;
+            if (viewParts.arms != null) FighterAvatar.TintFPArms(viewParts.arms, Config.TeamColor(team), Hero.tint);   // V22：袖子 = 队伍色，罗纹袖口 = 英雄色
             if (ToonAssets.Available && viewPan == null)   // V17：近战改成平底锅
             {
                 var pf = Resources.Load<GameObject>("Toon/FoodGuns/Pan");
@@ -257,6 +303,7 @@ namespace NeonSiege
             if (human) { AttachCamera(); if (viewPivot != null) viewPivot.gameObject.SetActive(true); }
             prone = false; SetHeight(false); freezeUntil = 0;
             stamina = Tune.StaminaMax; exhausted = false; adsK = 0; damageLog.Clear(); drawUntil = 0; proneChangeUntil = 0;
+            staminaWasFull = true; staminaFullAt = staminaRecoveredAt = exhaustedAt = swallowedAt = -100f; fireRevealUntil = 0; sprintPose = 0; recapKiller = null;
             armorClass = armorOverride >= 0 ? armorOverride : Hero.armorClass; helmetClass = armorOverride >= 0 ? armorOverride : Hero.helmetClass;
             if (ToonAssets.Available) Food.OnRespawn();
         }
@@ -288,7 +335,7 @@ namespace NeonSiege
             Vector3 wish = Vector3.zero; bool wantSprint = false, wantCrouch = false, jump = false, trigger = false, ads = false, use = false;
             if (!frozen)
             {
-                if (human)
+                if (human && !scripted)
                 {
                     mouseSensitivity = GameSettings.Sensitivity;
                     if (Cursor.lockState == CursorLockMode.Locked)
@@ -317,6 +364,7 @@ namespace NeonSiege
                     if (canAct && grenades > 0 && Input.GetKey(KeyCode.Alpha4)) PreviewGrenade(true);
                     if (Input.GetKeyUp(KeyCode.Alpha4)) { PreviewGrenade(false); if (canAct && grenades > 0) ThrowGrenade(Grenade.HumanVelocity(this)); }
                     if (canAct && Input.GetKeyDown(KeyCode.V)) Melee();
+                    if (canAct && Input.GetMouseButtonDown(2)) Pings.FromAim(this);   // V22 第三期：中键团队标记（敌人 / 这里 / 这儿能联动）
                     if (ToonAssets.Available)
                     {
                         if (canAct && Input.GetKeyDown(KeyCode.X)) Food.TryUlt();   // V18：大招
@@ -340,7 +388,7 @@ namespace NeonSiege
             if (prone) wantCrouch = false;
             if (wantCrouch != crouching && grounded && !Dashing && !prone)
             {
-                if (wantCrouch || !Physics.SphereCast(transform.position + Vector3.up * .5f, .3f, Vector3.up, out _, 1.2f, ~0, QueryTriggerInteraction.Ignore))
+                if (wantCrouch || !CeilingBlocked(.5f, 1.2f))
                     SetHeight(wantCrouch);
             }
             // Slide: crouch while sprinting. Mantle: jump into a ledge between 0.55 m and 2 m.
@@ -355,9 +403,12 @@ namespace NeonSiege
             if (human && (IsReloading || bombBusy || Dashing)) adsToggle = false;
             sprinting = wantSprint && !aiming && (!crouching || Sliding) && !trigger && wish.sqrMagnitude > .1f && !ShieldUp && !mantling && !prone && !exhausted && stamina > 0;
             // V20：体力 —— 冲刺消耗，停下一会儿后恢复；耗尽后要恢复到一定值才能再冲刺
-            if (sprinting && !Sliding) { stamina = Mathf.Max(0, stamina - Tune.SprintDrain * Time.deltaTime); staminaUsedAt = Time.time; if (stamina <= 0) exhausted = true; }
+            if (sprinting && !Sliding) { stamina = Mathf.Max(0, stamina - Tune.SprintDrain * Time.deltaTime); staminaUsedAt = Time.time; if (stamina <= 0) { if (!exhausted) { stats.exhaustCount++; exhaustedAt = Time.time; } exhausted = true; } }
             else if (Time.time - staminaUsedAt > Tune.RegenDelay) stamina = Mathf.Min(Tune.StaminaMax, stamina + Tune.StaminaRegen * Time.deltaTime);
-            if (exhausted && stamina >= Tune.ExhaustRecover) exhausted = false;
+            if (exhausted && stamina >= Tune.ExhaustRecover) { exhausted = false; staminaRecoveredAt = Time.time; }   // V22：过线那一刻状态带闪一下
+            bool staminaFull = stamina >= Tune.StaminaMax - .5f;
+            if (staminaFull && !staminaWasFull) staminaFullAt = Time.time;   // 回满后 HudStaminaFade 秒淡出
+            staminaWasFull = staminaFull;
             if (wasSprinting && !sprinting) sprintEndedAt = Time.time;
             wasSprinting = sprinting;
             // V20：开镜有时间（受负重影响），散布、视野都按开镜进度过渡
@@ -377,6 +428,7 @@ namespace NeonSiege
             speed *= W.moveMultiplier * Ballistics.WeightSpeedMul(this);
             if (Time.time < proneChangeUntil) speed *= .2f;
             if (ShieldUp) speed *= Config.ShieldMoveMultiplier;
+            if (ShieldWall.Docked.Count > 0 && ShieldWall.InCurtain(transform.position)) speed *= Config.ShieldDockPassSlow;   // V22 第三期：穿过果冻门帘时变慢
             if (Time.time < jammedUntil) speed *= Config.NoiseSlow;
             if (Time.time < creamUntil) speed *= .85f;
             if (ToonAssets.Available) speed *= Food.SpeedMul();
@@ -499,6 +551,7 @@ namespace NeonSiege
             if (best == null) return false;
             bool back = Vector3.Angle(best.transform.forward, transform.forward) < 60f;
             float dmg = back ? 120f : 55f;
+            DamageCtx.Set(DamageKind.Melee, ToonAssets.Available ? (back ? "平底锅背刺" : "平底锅") : (back ? "背刺" : "枪托近战"));
             bool killed = best.ReceiveDamage(dmg, this, transform.position, false);
             Sfx.Play(ToonAssets.Available ? "food_bonk" : "impactPunch_heavy", best.Chest, 1f, back ? .8f : 1f, human ? 0f : 1f, 20f);
             Fx.Burst(best.Chest, -transform.forward, new Color(1f, .2f, .15f), 14, 3f, .06f, .3f, .8f);
@@ -585,6 +638,7 @@ namespace NeonSiege
 
         void HandleUse(bool held)
         {
+            UseHeld = held;
             // Bomb first (plant / defuse), then world interactables.
             if (Match.I.BombAction(this, held, Time.deltaTime)) { if (usingInteract != null) { usingInteract.Release(this); usingInteract = null; } return; }
             Interactable near = held ? Interactable.Nearest(this) : null;
@@ -598,6 +652,8 @@ namespace NeonSiege
             bool pressed = held && !triggerWasHeld;
             triggerWasHeld = held;
             if (burstLeft > 0 && Time.time >= nextBurstAt) { FireBullet(); burstLeft--; nextBurstAt = Time.time + W.burstInterval; }
+            // V22：等待中（冲刺转开火 / 拔枪 / 趴下切换）按下开火 = 吞键：不缓冲（拍板 4b 甲），只记次数 + 准星中心闪灰点
+            if (pressed && !CanFireNow && Time.time >= nextShotAt && !IsReloading && burstLeft <= 0 && !Skills.Previewing(this)) { stats.swallowedShots++; swallowedAt = Time.time; }
             if (!held || Time.time < nextShotAt || IsReloading || burstLeft > 0 || Skills.Previewing(this) || !CanFireNow) return;
             if (!W.automatic && !pressed) return;
             if (ammo <= 0) { Reload(); if (human) Sfx.Ui("click", .4f, 1.6f); return; }
@@ -699,7 +755,7 @@ namespace NeonSiege
                 if (!FoodState.Incoming(f, this, dir, ref dmg)) return true;   // 幻频甩糖 / 汉堡盾
                 if (before > 0) { float r = dmg / before; hpDmg *= r; armorDmg *= r; }
                 bool armorHit = f.armor > 0 && cls > 0;
-                var rec = new HitRecord { attacker = Hero.name, weapon = w.id + "「" + w.name + "」", part = part, hp = hpDmg, armor = Mathf.Min(armorDmg, f.armor), distance = distance, time = Time.time, pen = w.pen, cls = f.armor > 0 ? cls : 0 };
+                var rec = new HitRecord { attacker = Hero.name, weapon = w.id + "「" + w.name + "」", part = part, hp = hpDmg, armor = Mathf.Min(armorDmg, f.armor), distance = distance, time = Time.time, pen = w.pen, cls = f.armor > 0 ? cls : 0, kind = DamageKind.Gun, source = this, gun = w, hasPart = true };
                 f.damageLog.Add(rec); if (f.damageLog.Count > 30) f.damageLog.RemoveAt(0);
                 if (human) Range.LastHit = rec;
                 bool killed = f.ReceiveDamage(hpDmg, this, transform.position, head, false, armorDmg);
@@ -810,6 +866,7 @@ namespace NeonSiege
         // Armor absorbs damage first (有效生命 150). Returns true if this hit killed.
         public bool ReceiveDamage(float amount, Fighter source, Vector3 from, bool head, bool explosive = false, float armorShare = -1f)
         {
+            bool hasCtx = DamageCtx.Take(out DamageKind ck, out string cn);   // 先取走，免得串到下一次
             if (!alive || Match.I.phase != Phase.Live) return false;
             if (Time.time < guardUntil) amount *= 1f - Config.DashDamageReduction;
             if (explosive && ToonAssets.Available && role == Role.Ironwall) amount *= .5f;   // 铁幕被动
@@ -819,6 +876,15 @@ namespace NeonSiege
             else { toArmor = Mathf.Min(armor, amount); armor -= toArmor; amount -= toArmor; }
             if (toArmor > 0 && armor <= 0) { lastArmorBreakAt = Time.time; Sfx.Play("impactGlass_heavy", Chest, human ? .5f : .7f, 1.6f, human ? 0 : 1, 25f); }
             float dealt = Mathf.Min(hp, amount) + toArmor;
+            // V22：非子弹伤害也写受击记录（子弹在 Resolve 里已经写过，带部位）——死亡回顾和击杀播报都读它
+            if (armorShare < 0)
+            {
+                if (!hasCtx) { ck = source == null ? DamageKind.Env : explosive ? DamageKind.Grenade : DamageKind.Gun; cn = source == null ? "环境伤害" : explosive ? "爆炸" : source.W.id + "「" + source.W.name + "」"; }
+                var rec = new HitRecord { attacker = source != null ? source.Hero.name : "环境", weapon = cn, kind = ck, source = source, gun = ck == DamageKind.Gun && source != null ? source.W : null,
+                    part = HitPart.Chest, hasPart = false, hp = Mathf.Max(0, Mathf.Min(hp, amount)), armor = toArmor, time = Time.time,
+                    distance = Vector3.Distance(source != null && source != this ? source.transform.position : from, transform.position) };
+                damageLog.Add(rec); if (damageLog.Count > 30) damageLog.RemoveAt(0);
+            }
             hp -= amount;
             lastDamageAt = Time.time; lastDamageFrom = from;
             if (source != null && source != this)
@@ -845,6 +911,9 @@ namespace NeonSiege
         void Die(Fighter killer, bool head)
         {
             hp = 0; alive = false; stats.deaths++; bombBusy = false;
+            // V22：死亡回顾快照 —— 真实击杀者、他还剩多少、你打了他多少
+            recapKiller = killer; recapKillerHp = killer != null ? Mathf.Max(0, killer.hp) : 0; recapKillerArmor = killer != null ? Mathf.Max(0, killer.armor) : 0; recapDealt = 0;
+            if (killer != null && killer != this) foreach (var r in killer.damageLog) if (r.source == this) recapDealt += r.hp + r.armor;
             if (ToonAssets.Available) Food.OnDeath();
             if (ToonAssets.Available) FoodFx.KillPop(Chest);   // V17：噗——变成一团彩带
             else
@@ -869,7 +938,15 @@ namespace NeonSiege
         {
             landDip = Mathf.MoveTowards(landDip, 0, Time.deltaTime * .5f);
             float eye = (prone ? .45f : crouching ? 1.08f : 1.62f) - (Sliding ? .12f : 0f) - landDip;
-            cam.transform.localPosition = Vector3.Lerp(cam.transform.localPosition, new Vector3(lean * .38f, eye - Mathf.Abs(lean) * .06f, 0), Time.deltaTime * (mantling ? 20f : 14f));
+            Vector3 camTarget = new Vector3(lean * .38f, eye - Mathf.Abs(lean) * .06f, 0);
+            Vector3 camLp = Vector3.Lerp(cam.transform.localPosition, camTarget, Time.deltaTime * (mantling ? 20f : 14f));
+            // V22：趴下 / 起身的镜头高度按 ProneTransition（0.45 s，前快后慢）走完，和"切换期间不能开火"同步
+            if (Time.time < proneChangeUntil && Tune.ProneTransition > .01f)
+            {
+                float pk = Mathf.Clamp01((Time.time - proneChangeAt) / Tune.ProneTransition);
+                camLp.y = Mathf.Lerp(proneCamFrom, camTarget.y, 1f - (1f - pk) * (1f - pk));
+            }
+            cam.transform.localPosition = camLp;
             if (Time.time - lastShotAt > .14f && recoilDebt > 0)
             {
                 float step = Mathf.Min(recoilDebt, Time.deltaTime * Mathf.Max(3f, recoilDebt * 7f));
@@ -887,7 +964,9 @@ namespace NeonSiege
             float targetFov = adsK > 0 ? Mathf.Lerp(baseFov, baseFov / W.adsZoom, adsK) : Sliding ? baseFov + Tune.SlideFovAdd : sprinting ? baseFov + Tune.SprintFovAdd : baseFov;
             if (Dashing) targetFov = 92f;
             fovKick = Mathf.Lerp(Mathf.Min(fovKick, 4f), 0, Time.deltaTime * 12f);
-            cam.fieldOfView = Mathf.Lerp(cam.fieldOfView, targetFov, Time.deltaTime * 14f) + fovKick * (aiming ? .3f : 1f) * Time.deltaTime * 10f;
+            // V22：开镜过程中视野直接跟 adsK（和枪模、散布同一个进度），其它情况保持平滑过渡
+            float fovNow = adsK > 0f && adsK < 1f && !Dashing ? targetFov : Mathf.Lerp(cam.fieldOfView, targetFov, Time.deltaTime * 14f);
+            cam.fieldOfView = fovNow + fovKick * (aiming ? .3f : 1f) * Time.deltaTime * 10f;
             if (viewPivot == null) return;
             float move = new Vector2(velocity.x, velocity.z).magnitude;
             viewBob += Time.deltaTime * move * 1.6f;
@@ -897,8 +976,13 @@ namespace NeonSiege
             viewKick = Mathf.MoveTowards(viewKick, 0, Time.deltaTime * .5f);
             boltKick = Mathf.MoveTowards(boltKick, 0, Time.deltaTime * 14f);
             if (bolt != null) bolt.localPosition = viewParts.boltRest - new Vector3(0, 0, boltKick * .05f);
-            Vector3 basePos = aiming ? viewAds : viewHip;
-            if (fpsView == null && sprinting) basePos += new Vector3(-.05f, -.05f, -.05f);
+            // V22：表现时长 = 规则时长。枪模的主位置不再用固定插值速度，而是直接读规则进度：
+            //   开镜位 = Lerp(腰射位, 开镜位, adsK)，和视野、散布同一个进度（负重越重举得越慢）；
+            //   冲刺姿势权重在冲刺结束后按本枪 sprintToFire 秒线性收回，收回完成的那一刻 CanFireNow 变真。
+            sprintPose = sprinting ? Mathf.MoveTowards(sprintPose, 1f, Time.deltaTime / .15f) : Mathf.Min(sprintPose, 1f - SprintRaiseK);
+            Vector3 core = Vector3.Lerp(viewHip, viewAds, Mathf.SmoothStep(0f, 1f, adsK));
+            if (fpsView == null) core += new Vector3(-.05f, -.05f, -.05f) * sprintPose;
+            Vector3 basePos = Vector3.zero;   // 下面这些是次要的手部动作（换弹、近战、翻越……），仍然平滑跟随
             if (fpsView == null && IsReloading) basePos += new Vector3(0, -.12f * Mathf.Sin(ReloadProgress * Mathf.PI), 0);
             if (bombBusy) basePos += new Vector3(0, -.3f, 0);
             if (mantling) basePos += new Vector3(.05f, -.22f, -.05f);
@@ -914,11 +998,19 @@ namespace NeonSiege
                 }
             }
             basePos += new Vector3(-localVel.x * .004f, -landDip * .6f, 0);   // weapon trails strafing and dips on landing
-            viewPivot.localPosition = Vector3.Lerp(viewPivot.localPosition, basePos + bob + viewSway + new Vector3(0, 0, -viewKick * (aiming ? .5f : 1f)), Time.deltaTime * 18f);
-            Quaternion rot = fpsView != null
+            viewExtra = Vector3.Lerp(viewExtra, basePos + bob + viewSway + new Vector3(0, 0, -viewKick * (aiming ? .5f : 1f)), Time.deltaTime * 18f);
+            viewPivot.localPosition = core + viewExtra;
+            Quaternion extraRot = fpsView != null
                 ? Quaternion.Euler(-viewKick * (aiming ? 12f : 35f), 0, 0)   // FPSSample clips already pose sprint / reload
-                : Quaternion.Euler(-viewKick * (aiming ? 30f : 90f) + (IsReloading ? Mathf.Sin(ReloadProgress * Mathf.PI) * 25f : 0), sprinting ? -18f : 0, (sprinting ? 12f : 0) + (IsReloading ? Mathf.Sin(ReloadProgress * Mathf.PI) * -20f : 0));
-            viewPivot.localRotation = Quaternion.Slerp(viewPivot.localRotation, rot, Time.deltaTime * 14f);
+                : Quaternion.Euler(-viewKick * (aiming ? 30f : 90f) + (IsReloading ? Mathf.Sin(ReloadProgress * Mathf.PI) * 25f : 0), 0, IsReloading ? Mathf.Sin(ReloadProgress * Mathf.PI) * -20f : 0);
+            viewExtraRot = Quaternion.Slerp(viewExtraRot, extraRot, Time.deltaTime * 14f);
+            Quaternion sprintRot = fpsView != null ? Quaternion.identity : Quaternion.Euler(0, -18f * sprintPose, 12f * sprintPose);   // 冲刺斜持枪 → 抬平，时长 = sprintToFire
+            viewPivot.localRotation = sprintRot * viewExtraRot;
+            if (viewParts != null && viewParts.armL != null && viewGun != null)   // V22：换弹时左手离开护木往下探（摸弹匣）再回来
+            {
+                float rk = IsReloading ? Mathf.Sin(Mathf.Clamp01((ReloadProgress - .15f) / .6f) * Mathf.PI) : 0f;
+                viewParts.armL.position = viewGun.TransformPoint(viewParts.armLRest + new Vector3(-.02f, -.09f, -.04f) * rk);
+            }
             if (viewParts != null && viewParts.mag != null) viewParts.mag.gameObject.SetActive(!IsReloading || ReloadProgress > .55f);
             // Through a magnified optic the weapon model is hidden and the UI draws the scope picture.
             if (viewGun != null) viewGun.gameObject.SetActive(!Scoped && !FoodAim);   // V18：开镜时枪模收起，换成美食准镜
@@ -926,6 +1018,8 @@ namespace NeonSiege
         }
 
         public void SetViewModelVisible(bool v) { if (viewPivot != null) viewPivot.gameObject.SetActive(v); }
+        public GunParts ViewParts { get { return viewParts; } }   // V22：测试读第一人称手臂
+        public Transform ViewGun { get { return viewGun; } }
         public Transform LaserOrigin { get { return human && viewParts != null ? viewParts.laser : avatar != null ? avatar.LaserOrigin : null; } }
     }
 
@@ -933,6 +1027,7 @@ namespace NeonSiege
     {
         public Transform muzzle, eject, bolt, mag, laser;
         public Vector3 sightLocal, foregrip, boltRest;
+        public Transform arms, armL; public Vector3 armLRest, palmLTarget;   // V22：第一人称手臂（DessertGuns.AttachArms），armLRest / palmLTarget 在枪 pivot 空间
     }
 
     // Normalises the Quaternius gun FBX (muzzle +Z, grip at pivot, real length) and dresses it with

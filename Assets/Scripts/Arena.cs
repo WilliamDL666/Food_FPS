@@ -11,6 +11,8 @@ namespace NeonSiege
     {
         public static Arena I;
         public const float HalfX = 72f, HalfZ = 50f;
+        public const float LinkX0 = -5f, LinkX1 = 1f;          // V22 第二期：北烤串巷 / 南后厨 x 范围（6 m 宽）
+        public const float CreamTop = 3.5f, RoofTop = 8f;      // 奶油平台台面 / 市场楼顶能站的高度（楼顶板只有外观没有碰撞，人站在楼体顶面 8 m）
         public static readonly Vector3 SiteA = new Vector3(37, 0, 34), SiteB = new Vector3(37, 0, -34);
         public readonly List<Rect> minimapBlocks = new List<Rect>();
         public readonly List<Vector3> noBuild = new List<Vector3>();
@@ -35,9 +37,14 @@ namespace NeonSiege
             new Zone { name = "守方安保站", hint = "防守方出生点", area = Rect.MinMaxRect(56, -10, 72, 10), color = new Color(.3f, .7f, 1f) },
             new Zone { name = "北小巷", hint = "主街 ↔ 北长街", area = Rect.MinMaxRect(-24, 10, -18, 30), color = new Color(1f, .3f, .7f) },
             new Zone { name = "南小巷", hint = "主街 ↔ 南工厂通道 · 卷帘门", area = Rect.MinMaxRect(-36, -30, -30, -10), color = new Color(.7f, .4f, 1f) },
-            new Zone { name = "北铁门检查站", hint = "北长街唯一通路 · 长按 G 开铁门（巨响）", area = Rect.MinMaxRect(0, 30, 9, 50), color = new Color(1f, .35f, .2f) },
-            new Zone { name = "南铁门检查站", hint = "南工厂通道唯一通路 · 长按 G 开铁门（巨响）", area = Rect.MinMaxRect(0, -50, 9, -30), color = new Color(1f, .35f, .2f) },
-            new Zone { name = "市场楼顶", hint = "高台狙击位 · 只能从东侧弹射板上来", area = Rect.MinMaxRect(30, -9, 44, 9), color = new Color(.95f, .35f, .35f) },
+            // V22 第二期（方案甲）：两条中段连接 + 中段十字 + 奶油平台
+            new Zone { name = "北烤串巷", hint = "主街 ↔ 北长街中段 · 外卖阳台 3.5 m", area = Rect.MinMaxRect(-5, 10, 1, 30), color = new Color(1f, .55f, .35f) },
+            new Zone { name = "南后厨", hint = "主街 ↔ 南长街中段 · 室内厨房 · 蒸汽阀", area = Rect.MinMaxRect(-5, -30, 1, -10), color = new Color(1f, .7f, .5f) },
+            new Zone { name = "北关口 · 蒸笼门", hint = "默认开着 · 守方长按 G 盖上（巨响）· 墙洞可钻", area = Rect.MinMaxRect(0, 30, 14, 50), color = new Color(1f, .7f, .35f) },
+            new Zone { name = "南关口 · 蒸笼门", hint = "默认开着 · 守方长按 G 盖上（巨响）· 火锅热气", area = Rect.MinMaxRect(0, -50, 14, -30), color = new Color(1f, .7f, .35f) },
+            new Zone { name = "市场楼顶", hint = "高台 · 东侧楼梯 / 弹射板上来 · 横幅挡住主街西段", area = Rect.MinMaxRect(30, -9, 44, 9), color = new Color(.95f, .35f, .35f) },
+            new Zone { name = "中庭 · 奶油平台", hint = "3.5 m 中层 · 西坡道 / 东楼梯 · 俯看两个连廊口", area = Rect.MinMaxRect(10, -6, 24, 6), color = new Color(1f, .7f, .85f) },
+            new Zone { name = "中段十字", hint = "空中连廊下 · 北烤串巷 ↑ / 南后厨 ↓", area = Rect.MinMaxRect(-12, -10, 4, 10), color = new Color(1f, .4f, .6f) },
             new Zone { name = "夜市主街", hint = "中路 · 通往中庭", area = Rect.MinMaxRect(-56, -10, 14, 10), color = new Color(1f, .25f, .7f) },
             new Zone { name = "北长街", hint = "通往 A 点", area = Rect.MinMaxRect(-72, 30, 26, 50), color = new Color(1f, .6f, .2f) },
             new Zone { name = "南工厂通道", hint = "通往 B 点", area = Rect.MinMaxRect(-72, -50, 26, -30), color = new Color(.6f, .35f, 1f) },
@@ -66,7 +73,9 @@ namespace NeonSiege
         public static void Kill(Object o)
         {
             if (o == null) return;
-            if (Application.isPlaying) Object.Destroy(o); else Object.DestroyImmediate(o);
+            // V22 第二期：组件（主要是"只要外观、不要碰撞"的碰撞体）立即销毁 —— NavMesh 在 Build() 同一帧烘焙，
+            // 延迟销毁会让酱料圆片的胶囊碰撞（半径 = 长轴一半）等在 NavMesh 上留下看不见的"圆包"
+            if (Application.isPlaying && !(o is Component)) Object.Destroy(o); else Object.DestroyImmediate(o);
         }
 
         static Material Load(string name, Color fallback)
@@ -127,15 +136,19 @@ namespace NeonSiege
             var ground = Box("地面 · 沥青路", new Vector3(0, -.25f, 0), new Vector3(HalfX * 2 + 60, .5f, HalfZ * 2 + 60), asphalt, false);
             ground.GetComponent<Renderer>().receiveShadows = true;
             Buildings();
+            V22Buildings();    // V22 第二期：寿司吧 / 糖果铺 / 冰柜仓（长街错位建筑）+ 东通道奶茶亭
             Spawns();
             MidStreet();
             NorthStreet();
             SouthStreet();
             Plaza();
+            PlazaV22();        // V22 第二期：中庭牌楼横幅 + 奶油平台
             SiteAArea();
             SiteBArea();
             Skyline();
             Alleys();
+            KebabAlley();      // V22 第二期：北烤串巷（外卖阳台）
+            SouthKitchen();    // V22 第二期：南后厨（室内厨房）
             CyberDressing();
             ZoneMarkings();
             TacticalLayout();
@@ -691,7 +704,7 @@ namespace NeonSiege
             if (!ToonAssets.Available) return;
             // 内圈楼顶
             Food("MilkTea", new Vector3(-40, 14.6f, 20), 20, 11f);
-            Food("HotPot", new Vector3(-2, 16.6f, 20), 0, 5f);
+            Food("HotPot", new Vector3(-11, 16.6f, 20), 0, 5f);   // V22：原 x=-2 正好在北烤串巷上空
             Food("BigCake", new Vector3(-46, 13.6f, -20), 0, 7f);
             Food("IceCream", new Vector3(-8, 15.6f, -20), 0, 10f);
             Food("Burger", new Vector3(20, 9.6f, 29), 30, 4f);
@@ -729,16 +742,27 @@ namespace NeonSiege
                 SteamCloud.particles.Add(BigSteam(hp + Vector3.up * 1.2f, 2.2f, .5f));
                 SteamCloud.Add(hp + Vector3.up * 2.6f, 2.6f);
             }
-            // V18：食材刷新点
-            foreach (var sp in new[] { new Vector3(-45, 0, -4), new Vector3(-30, 0, 5.2f), new Vector3(-12, 0, -5.5f), new Vector3(14, 0, 0), new Vector3(24, 0, -7.5f),
-                new Vector3(-52, 0, 40), new Vector3(-22, 0, 44), new Vector3(2, 0, 36), new Vector3(-52, 0, -39.5f), new Vector3(-24, 0, -41), new Vector3(2, 0, -34),
+            // V22 第二期：北关口关东煮锅 —— 和南路火锅对称（热气挡视线、站进去烫），正面朝西边的蒸笼门
+            {
+                var hp = new Vector3(12.5f, 0, 44f);
+                ClimbFood("HotPot", hp, .9f, 30, new Vector2(1.5f, 1.0f));
+                var hz = new GameObject("关东煮烫伤区"); hz.transform.position = hp; hz.AddComponent<HotpotHazard>(); hz.transform.SetParent(transform, true);
+                SteamCloud.particles.Add(BigSteam(hp + Vector3.up * 1.2f, 2.2f, .5f));
+                SteamCloud.Add(hp + Vector3.up * 2.6f, 2.6f);
+                Sign("关东煮", hp + new Vector3(-1.6f, 3.6f, 0), -90, new Color(1f, .7f, .35f), .6f);
+            }
+            // V22 第二期：蒸汽阀 ×3（中庭南北各一、南后厨一个）—— 长按 G 喷 6 s 白雾挡视线，冷却 25 s，谁都能用
+            Valve(new Vector3(16, 0, 8), 180); Valve(new Vector3(16, 0, -8), 0); Valve(new Vector3(.35f, 0, -21f), -90);
+            // V18：食材刷新点（V22：南关口那个原来在 (2, -34)，正好在岗亭里，AI 会一直去够它 → 挪到岗亭和门洞之间）
+            foreach (var sp in new[] { new Vector3(-45, 0, -4), new Vector3(-30, 0, 5.2f), new Vector3(-13.5f, 0, -4.5f), new Vector3(14, 0, 0), new Vector3(24, 0, -7.5f),
+                new Vector3(-52, 0, 40), new Vector3(-22, 0, 44), new Vector3(2, 0, 36), new Vector3(-52, 0, -39.5f), new Vector3(-24, 0, -41), new Vector3(1.6f, 0, -36.3f),
                 new Vector3(24, 0, -36), new Vector3(39, 0, 22.5f), new Vector3(40, 0, -30), new Vector3(-21, 0, 14), new Vector3(-33, 0, -14), new Vector3(52.5f, 0, -8), new Vector3(-60, 0, 14) })
             { var g = new GameObject("食材刷新点"); g.transform.position = sp; g.AddComponent<IngredientSpot>(); g.transform.SetParent(transform, true); }
             // V18：厨房设施
             void Station(KitchenStation.Kind k, Vector3 p, float rotY) { var g = new GameObject("厨房 " + k); g.transform.position = p; g.transform.rotation = Quaternion.Euler(0, rotY, 0); g.AddComponent<KitchenStation>().Build(k); g.transform.SetParent(transform, true); }
-            Station(KitchenStation.Kind.HotpotHeal, new Vector3(-26, 0, -8.3f), 0); Station(KitchenStation.Kind.HotpotHeal, new Vector3(53, 0, -14), 0); Station(KitchenStation.Kind.HotpotHeal, new Vector3(-36, 0, 33.6f), 0);
+            Station(KitchenStation.Kind.HotpotHeal, new Vector3(-19, 0, -8.6f), 0);   // V22：原 (-26,-8.3) 让给外摆棚 Station(KitchenStation.Kind.HotpotHeal, new Vector3(53, 0, -14), 0); Station(KitchenStation.Kind.HotpotHeal, new Vector3(-36, 0, 33.6f), 0);
             Station(KitchenStation.Kind.MilkTea, new Vector3(-58.5f, 0, 8.5f), 180); Station(KitchenStation.Kind.MilkTea, new Vector3(58.5f, 0, -8.5f), 0);
-            Station(KitchenStation.Kind.Oven, new Vector3(16, 0, -12.4f), 0); Station(KitchenStation.Kind.Freezer, new Vector3(16, 0, 12.4f), 180);
+            Station(KitchenStation.Kind.Oven, new Vector3(-4.25f, 0, -19.5f), 90); Station(KitchenStation.Kind.Freezer, new Vector3(16, 0, 12.4f), 180);   // V22：烤箱从中庭挪进南后厨
             // V18：传菜转盘（站上去会被带着转）
             {
                 var tg = new GameObject("传菜转盘"); tg.transform.position = new Vector3(8, 0, -2.5f); tg.transform.SetParent(transform, true);
@@ -767,7 +791,7 @@ namespace NeonSiege
                 cl.AddComponent<CloudDrift>().speed = .8f + (i % 3) * .4f;
             }
             // V19：外圈人行道的糖果树（贴墙，不挡路）
-            foreach (float tx in new[] { -63f, -45f, -38f, -14f, 6f, 30f, 44f, 60f })
+            foreach (float tx in new[] { -63f, -45f, -38f, -14f, 6f, 30f, 52f, 60f })   // V22：x=44 那棵会被 A 点北侧方块盖住
                 foreach (float tz in new[] { 49.4f, -49.4f })
                 {
                     var tr = Model("Toon/Kitchen/CandyTree"); if (tr == null) break;
@@ -776,7 +800,7 @@ namespace NeonSiege
                     hold.transform.position = new Vector3(tx, .12f, tz); hold.transform.rotation = Quaternion.Euler(0, tz > 0 ? 180 : 0, 0); hold.transform.SetParent(transform, true);
                 }
             // V19：路边一堆堆彩色糖粒
-            foreach (var sp in new[] { new Vector3(-48, .02f, 8.4f), new Vector3(-8, .02f, -8.4f), new Vector3(-56, .02f, 31.4f), new Vector3(-30, .02f, -31.4f), new Vector3(10, .02f, 31.4f), new Vector3(30, .02f, -6f), new Vector3(46, .02f, 6f), new Vector3(-8, .02f, 48.6f), new Vector3(-40, .02f, -48.6f), new Vector3(20, .02f, 48.6f) })
+            foreach (var sp in new[] { new Vector3(-48, .02f, 8.4f), new Vector3(-6.3f, .02f, -8.4f), new Vector3(-56, .02f, 31.4f), new Vector3(-30, .02f, -31.4f), new Vector3(6.4f, .02f, 34f), new Vector3(30, .02f, -6f), new Vector3(48.2f, .02f, 6f), new Vector3(-8, .02f, 48.6f), new Vector3(-40, .02f, -48.6f), new Vector3(20, .02f, 48.6f) })   // V22：三堆避开外摆棚 / 冰柜仓 / 楼顶楼梯
             {
                 var pile = Model("Toon/Kitchen/SprinklePile"); if (pile == null) break;
                 foreach (var c in pile.GetComponentsInChildren<Collider>()) Kill(c);
@@ -786,7 +810,7 @@ namespace NeonSiege
             Food("Donut", new Vector3(-64, 4.45f, 0), 90, 3.2f);
             Food("MilkTea", new Vector3(64, 4.45f, 0), 0, 3.2f);
             // 火锅冒热气
-            foreach (var hp in new[] { new Vector3(-2, 21.4f, 20), new Vector3(30, 28.4f, 56), new Vector3(-40, 28.4f, -55) }) BigSteam(hp, 2f, .25f);
+            foreach (var hp in new[] { new Vector3(-11, 21.4f, 20), new Vector3(30, 28.4f, 56), new Vector3(-40, 28.4f, -55) }) BigSteam(hp, 2f, .25f);
         }
 
         ParticleSystem BigSteam(Vector3 p, float radius, float alpha)
@@ -803,6 +827,334 @@ namespace NeonSiege
             return ps;
         }
 
+        // ================================================================== V22 第二期：方案甲（三路 + 中段十字 + 中庭双层）
+        // 设计稿：Docs/设计稿_V22_地图重构与干员地图联动.md §3.1 / §3.4。全部用程序化方块 + 糖果材质 + 奶油滴边，和 V19 萌化风格一致。
+        // 注意：生成顺序必须确定（烘焙按 Arena 下渲染器顺序匹配），这里不用随机数。
+        static readonly Dictionary<string, Material> v22Mats = new Dictionary<string, Material>();
+        Material Candy(string key, Color c, float gloss = .35f)
+        {
+            if (v22Mats.TryGetValue(key, out var m) && m != null) return m;
+            m = new Material(Shader.Find("Standard")) { name = "V22 " + key }; m.color = c; m.SetFloat("_Glossiness", gloss);
+            return v22Mats[key] = m;
+        }
+        // 竖条纹（雨棚）/ 棋盘格（后厨地砖）
+        Material Pattern(string key, Color a, Color b, bool checker)
+        {
+            if (v22Mats.TryGetValue(key, out var m) && m != null) return m;
+            const int N = 64; var px = new Color[N * N];
+            for (int y = 0; y < N; y++) for (int x = 0; x < N; x++) px[y * N + x] = (checker ? (x / 32 + y / 32) % 2 == 0 : (x / 8) % 2 == 0) ? a : b;
+            var t = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Repeat, filterMode = FilterMode.Bilinear }; t.SetPixels(px); t.Apply();
+            m = new Material(Shader.Find("Standard")) { name = "V22 " + key, mainTexture = t }; m.SetFloat("_Glossiness", checker ? .55f : .35f);
+            return v22Mats[key] = m;
+        }
+        static void Tile(GameObject o, float sx, float sy) { var mpb = new MaterialPropertyBlock(); mpb.SetVector("_MainTex_ST", new Vector4(sx, sy, 0, 0)); o.GetComponent<Renderer>().SetPropertyBlock(mpb); }
+
+        // 可走坡道（和狙击台楼梯同一做法：0.2 m 厚斜板，NavMesh 直接覆盖），top = 上沿中点，dirDown = 往下走的水平方向
+        GameObject Ramp(string name, Vector3 top, Vector3 dirDown, float H, float run, float width, Material m, Material stepMat)
+        {
+            dirDown.y = 0; dirDown.Normalize();
+            Vector3 bottom = top + dirDown * run - Vector3.up * H;
+            float len = Mathf.Sqrt(run * run + H * H);
+            var ramp = GameObject.CreatePrimitive(PrimitiveType.Cube); ramp.name = name;
+            ramp.transform.position = (top + bottom) / 2 + Vector3.down * .1f;
+            ramp.transform.rotation = Quaternion.LookRotation(bottom - top);
+            ramp.transform.localScale = new Vector3(width, .2f, len);
+            ramp.GetComponent<Renderer>().sharedMaterial = m; ramp.transform.SetParent(transform, true);
+            int n = Mathf.Max(4, Mathf.RoundToInt(len / .5f));
+            for (int i = 1; i < n; i++)
+            {
+                var step = GameObject.CreatePrimitive(PrimitiveType.Cube); Kill(step.GetComponent<Collider>()); step.name = name + "台阶纹";
+                step.transform.position = Vector3.Lerp(top, bottom, i / (float)n) + Vector3.up * .012f; step.transform.rotation = Quaternion.LookRotation(dirDown);
+                step.transform.localScale = new Vector3(width * .96f, .05f, .12f); step.GetComponent<Renderer>().sharedMaterial = stepMat;
+                step.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; step.transform.SetParent(transform, true);
+            }
+            Vector3 mid = (top + bottom) / 2; Vector3 ext = new Vector3(Mathf.Abs(dirDown.x) * run + Mathf.Abs(dirDown.z) * width, 0, Mathf.Abs(dirDown.z) * run + Mathf.Abs(dirDown.x) * width);
+            minimapBlocks.Add(new Rect(mid.x - ext.x / 2, mid.z - ext.z / 2, ext.x, ext.z));
+            return ramp;
+        }
+
+        // 单向"跳下"导航连接（高点 → 地面）。AI 走到起点会直接从缺口跳下去
+        public readonly List<OffMeshLink> jumpLinks = new List<OffMeshLink>();
+        void JumpLink(Vector3 a, Vector3 b)
+        {
+            var s = new GameObject("跳下连接起点").transform; s.SetParent(transform, false); s.position = a;
+            var e = new GameObject("跳下连接终点").transform; e.SetParent(transform, false); e.position = b;
+            var l = s.gameObject.AddComponent<OffMeshLink>(); l.startTransform = s; l.endTransform = e; l.biDirectional = false; l.costOverride = 2f;
+            jumpLinks.Add(l);
+        }
+
+        void Valve(Vector3 p, float rotY)
+        {
+            var g = new GameObject("蒸汽阀"); g.transform.position = p; g.transform.rotation = Quaternion.Euler(0, rotY, 0);
+            g.AddComponent<SteamValve>().Build(); g.transform.SetParent(transform, true);
+        }
+
+        // 长街错位建筑（寿司吧 / 糖果铺 / 冰柜仓）+ 东通道奶茶亭 / 冰淇淋亭
+        void V22Buildings()
+        {
+            var rice = Candy("sushiWall", new Color(.97f, .94f, .87f), .2f);
+            var nori = Candy("nori", new Color(.16f, .26f, .2f), .25f);
+            var salmon = Pattern("salmonStripe", new Color(1f, .55f, .4f), new Color(1f, .93f, .86f), false);
+            var candyWall = Candy("candyWall", new Color(1f, .78f, .87f), .3f);
+            var candyStripe = Pattern("candyStripe", new Color(1f, .4f, .6f), Color.white, false);
+            var iceWall = Candy("iceWall", new Color(.74f, .9f, 1f), .4f);
+            var iceStripe = Pattern("iceStripe", new Color(.45f, .75f, 1f), Color.white, false);
+            foreach (float s in new[] { 1f, -1f })
+            {
+                // 寿司吧：长街西段北（南）侧 z 35.5–50，把长街切成 ≤ 42 m；正对长街的一面挂海苔带和三文鱼条纹雨棚
+                float zn = s > 0 ? 34.5f : -50f, zf = s > 0 ? 50f : -34.5f, face = s * 34.5f;
+                Block("寿司吧", -34, -26, zn, zf, 7, rice);
+                Box("寿司吧海苔带", new Vector3(-30, 3.1f, face - s * .07f), new Vector3(8.1f, .9f, .12f), nori, false, 0, false);
+                Box("寿司吧海苔带", new Vector3(-34.07f, 3.1f, (zn + zf) / 2), new Vector3(.12f, .9f, 14.6f), nori, false, 0, false);
+                var aw = Box("寿司吧雨棚", new Vector3(-30, 2.75f, face - s * .75f), new Vector3(8.4f, .1f, 1.5f), salmon, false, 0, false); Tile(aw, 4, 1);
+                Sign("寿司吧", new Vector3(-34.1f, 5.2f, (zn + zf) / 2), -90, new Color(1f, .5f, .35f), 1.1f);
+                Sign("回转寿司", new Vector3(-30, 5.3f, face - s * .1f), s > 0 ? 180 : 0, new Color(1f, .5f, .35f), .8f);
+                Food("Sushi", new Vector3(-30, 7.6f, (zn + zf) / 2), 30, 2.6f);
+                // 糖果铺：长街西段南（北）侧 z 30–35.5，和寿司吧错开、在 z=35.5 处首尾相接 → 没有贯穿长街的直线
+                float cn = s > 0 ? 30f : -35.5f, cf = s > 0 ? 35.5f : -30f;
+                Block("糖果铺", -52, -44, cn, cf, 6, candyWall);
+                var ca = Box("糖果铺雨棚", new Vector3(-48, 2.75f, s * 35.5f + s * .75f), new Vector3(8.4f, .1f, 1.5f), candyStripe, false, 0, false); Tile(ca, 4, 1);
+                Sign("糖果铺", new Vector3(-52.1f, 4.4f, (cn + cf) / 2), -90, new Color(1f, .45f, .7f), 1f);
+                Sign("棉花糖 · 棒棒糖", new Vector3(-48, 4.5f, s * 35.5f + s * .1f), s > 0 ? 0 : 180, new Color(1f, .45f, .7f), .7f);
+                Food("LollipopLamp", new Vector3(-50, 6.6f, s * 32.75f), 0, 2.6f); Food("Macarons", new Vector3(-46, 6.6f, s * 32.75f), 0, 1.4f);
+                // 外卖铺：长街中段南（北）侧 z 30–36.5，和糖果铺一起把寿司吧夹在中间（南-北-南三段错位）→ 斜着也穿不过去
+                float tn = s > 0 ? 30f : -36.5f, tf = s > 0 ? 36.5f : -30f;
+                Block("外卖铺", -16, -10, tn, tf, 5, Candy("deliveryWall", new Color(1f, .88f, .6f), .3f));
+                var da = Box("外卖铺雨棚", new Vector3(-13, 2.75f, s * 36.5f + s * .75f), new Vector3(6.4f, .1f, 1.5f), Pattern("deliveryStripe", new Color(1f, .6f, .25f), Color.white, false), false, 0, false); Tile(da, 3, 1);
+                Sign("外卖", new Vector3(-16.1f, 3.8f, (tn + tf) / 2), -90, new Color(1f, .6f, .25f), .8f);
+                Sign("霓城外卖站", new Vector3(-13, 3.9f, s * 36.5f + s * .1f), s > 0 ? 0 : 180, new Color(1f, .6f, .25f), .6f);
+                Food("Burger", new Vector3(-13, 5.6f, s * 33.25f), 0, 1.8f);
+                // 西侧通道：出生区门口一块美食方块，切断穿过出生区的南北直线（北长街西头 ↔ 南长街西头）
+                Container(new Vector3(-63, 0, s * 18f), 0, new Color(.85f, .6f, .9f));
+            }
+            // 冰柜仓：长街东段，蒸笼门后第一道错位（北 x 8–12 / 南 x 11.5–15.5，南侧给火锅让出 2 m 通道），迫使进包点前换一次角度
+            Block("冰柜仓", 8, 12, 30, 40, 5.5f, iceWall);
+            Block("冰柜仓", 11.5f, 15.5f, -40, -30, 5.5f, iceWall);
+            foreach (var w in new[] { (8f, 35f), (11.5f, -35f) })
+            {
+                var ia = Box("冰柜仓雨棚", new Vector3(w.Item1 - .7f, 2.75f, w.Item2), new Vector3(1.4f, .1f, 9.6f), iceStripe, false, 0, false); Tile(ia, 1, 5);
+                Sign("冰柜仓", new Vector3(w.Item1 - .08f, 4.2f, w.Item2), -90, new Color(.4f, .8f, 1f), .9f);
+                Food("IceCream", new Vector3(w.Item1 + 2, 6.1f, w.Item2), 0, 3.2f);
+            }
+            // 东通道：两处奶茶亭 + 两处冰淇淋亭，和 T 墙、出生区围墙错位，把 100 m 的南北直线切成 ≤ 40 m
+            foreach (float s in new[] { 1f, -1f })
+            {
+                Kiosk("奶茶亭", 48.8f, 57.5f, s > 0 ? 15f : -21f, s > 0 ? 21f : -15f, 2.6f, new Color(.85f, .62f, .42f), "MilkTea");
+                Kiosk("冰淇淋亭", 59.5f, 67.5f, s > 0 ? 20.5f : -28.5f, s > 0 ? 28.5f : -20.5f, 2.6f, new Color(.55f, .8f, 1f), "IceCream");
+            }
+        }
+
+        void Kiosk(string name, float x0, float x1, float z0, float z1, float h, Color c, string food)
+        {
+            float cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+            Box(name, new Vector3(cx, h / 2, cz), new Vector3(x1 - x0, h, z1 - z0), Candy("kiosk" + name, Color.Lerp(c, Color.white, .55f), .3f));
+            Box(name + "柜台条", new Vector3(cx, 1.05f, cz), new Vector3(x1 - x0 + .06f, .18f, z1 - z0 + .06f), Candy("kioskBand" + name, c, .4f), false, 0, false);
+            var roof = Box(name + "雨棚", new Vector3(cx, h + .1f, cz), new Vector3(x1 - x0 + .8f, .14f, z1 - z0 + .8f), Pattern("kioskStripe" + name, c, Color.white, false), false, 0, false); Tile(roof, 5, 1);
+            FrostingEdges(x0, x1, z0, z1, h + .1f);
+            Food(food, new Vector3(cx, h + .2f, cz), 0, 2.2f);
+            Sign(name, new Vector3(x0 - .07f, 1.9f, cz), -90, c, .6f);
+            Sign(name, new Vector3(x1 + .07f, 1.9f, cz), 90, c, .6f);
+        }
+
+        // 主街高摊位岛：实心 2.5 m 的"甜品高摊"（海绵蛋糕 + 奶油层 + 草莓层），甜品屋摊位挂在它西侧
+        void StallIsland(float x0, float x1, float z0, float z1)
+        {
+            float cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, w = x1 - x0, d = z1 - z0;
+            Box("高摊位岛", new Vector3(cx, 1.25f, cz), new Vector3(w, 2.5f, d), Candy("sponge", new Color(1f, .86f, .58f), .15f));
+            Box("高摊位岛草莓层", new Vector3(cx, .85f, cz), new Vector3(w + .06f, .22f, d + .06f), Candy("pinkCream", new Color(1f, .6f, .75f), .5f), false, 0, false);
+            Box("高摊位岛奶油层", new Vector3(cx, 1.7f, cz), new Vector3(w + .06f, .3f, d + .06f), Candy("cream", new Color(1f, .97f, .92f), .5f), false, 0, false);
+            Box("高摊位岛顶", new Vector3(cx, 2.56f, cz), new Vector3(w + .3f, .12f, d + .3f), Candy("cream", new Color(1f, .97f, .92f), .5f), false, 0, false);
+            FrostingEdges(x0, x1, z0, z1, 2.55f);
+            Food("CakeSlice", new Vector3(cx - 1.8f, 2.62f, cz + 2.2f), 20, 1.5f); Food("Macarons", new Vector3(cx + 2f, 2.62f, cz - 2f), 0, 1.1f); Food("Donut", new Vector3(cx + 1.6f, 2.62f, cz + 2.6f), 0, 1.1f);
+            Sign("甜品高摊", new Vector3(cx, 2.15f, z1 + .06f), 0, new Color(1f, .5f, .75f), .55f);
+            Sign("甜品高摊", new Vector3(cx, 2.15f, z0 - .06f), 180, new Color(1f, .5f, .75f), .55f);
+            Lamp(new Vector3(cx, 3.6f, cz), new Color(1f, .78f, .86f), 1.6f, 10f);
+        }
+
+        // 外摆棚：实心冷饮 / 甜甜圈柜台（2.4 m）+ 条纹雨棚，贴着楼面，把侧道挡住一半
+        void Awning(string name, float x0, float x1, float z0, float z1, Color c, string food, float faceY)
+        {
+            float cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+            Box(name, new Vector3(cx, 1.2f, cz), new Vector3(x1 - x0, 2.4f, z1 - z0), Candy("awningBody" + name, Color.Lerp(c, Color.white, .6f), .3f));
+            var roof = Box(name + "雨棚", new Vector3(cx, 2.62f, cz), new Vector3(x1 - x0 + .8f, .12f, z1 - z0 + .5f), Pattern("awningStripe" + name, c, Color.white, false), false, 0, false); Tile(roof, 4, 1);
+            Box(name + "柜台条", new Vector3(cx, 1.05f, cz), new Vector3(x1 - x0 + .06f, .16f, z1 - z0 + .06f), Candy("awningBand" + name, c, .45f), false, 0, false);
+            Food(food, new Vector3(cx, 2.7f, cz), 0, 1.3f);
+            Vector3 front = faceY == 0 ? new Vector3(cx, 1.85f, z1 + .06f) : new Vector3(cx, 1.85f, z0 - .06f);
+            Sign(name.Replace("外摆棚 · ", ""), front, faceY, c, .55f);
+        }
+
+        // 中庭：x=12 牌楼横幅（离地 3.5–9 m 实心，地面照常走；市场楼顶看不到主街西段）+ 奶油平台（3.5 m，西坡道 / 东楼梯）
+        void PlazaV22()
+        {
+            var pillar = Candy("archPillar", new Color(.62f, .4f, .3f), .3f);
+            foreach (float s in new[] { 1f, -1f }) Box("牌楼柱", new Vector3(12, 4.9f, s * 9.65f), new Vector3(.7f, 9.8f, .7f), pillar);
+            // 牌楼两侧落地侧柜（z ±7–9.3，高 3.5 m）：中庭入口收成 14 m，主街贴墙的斜线不再从牌楼边上穿进中庭再穿到东通道
+            foreach (float s in new[] { 1f, -1f }) { Box("牌楼侧柜", new Vector3(12, 1.75f, s * 8.15f), new Vector3(.8f, 3.5f, 2.3f), Candy("archCabinet", new Color(1f, .8f, .62f), .3f)); }
+            Box("牌楼顶梁", new Vector3(12, 9.65f, 0), new Vector3(.9f, .6f, 20.4f), pillar, false);
+            Color[] bc = { new Color(1f, .62f, .72f), new Color(.62f, .9f, .75f), new Color(1f, .86f, .5f), new Color(.75f, .65f, 1f) };
+            for (int i = 0; i < 4; i++) Box("牌楼横幅", new Vector3(12, 6.25f, -7.2f + i * 4.8f), new Vector3(.3f, 5.5f, 4.8f), Candy("banner" + i, bc[i], .25f), false);
+            Sign("美食中庭", new Vector3(11.8f, 7.4f, 0), -90, new Color(1f, .55f, .7f), 1.2f);
+            Sign("美食中庭", new Vector3(12.2f, 7.4f, 0), 90, new Color(1f, .55f, .7f), 1.2f);
+            Lamp(new Vector3(10.5f, 3f, 0), new Color(1f, .8f, .7f), 1.6f, 10f);
+
+            const float T = CreamTop;
+            var sponge = Candy("sponge", new Color(1f, .86f, .58f), .15f);
+            var cream = Candy("cream", new Color(1f, .97f, .92f), .5f);
+            var pink = Candy("pinkCream", new Color(1f, .6f, .75f), .5f);
+            var wafer = Candy("wafer", new Color(.93f, .72f, .42f), .25f);
+            Box("奶油平台", new Vector3(20, T - .2f, 0), new Vector3(8, .4f, 10), sponge, false);
+            void Band(float y, float h, Material m)
+            {
+                Box("奶油平台饰边", new Vector3(20, y, 4.85f), new Vector3(8.1f, h, .3f), m, false);
+                Box("奶油平台饰边", new Vector3(20, y, -4.85f), new Vector3(8.1f, h, .3f), m, false);
+                Box("奶油平台饰边", new Vector3(16.15f, y, 0), new Vector3(.3f, h, 9.4f), m, false);
+                Box("奶油平台饰边", new Vector3(23.85f, y, 0), new Vector3(.3f, h, 9.4f), m, false);
+            }
+            Band(T - .55f, .3f, cream); Band(T - .82f, .24f, pink);
+            foreach (float px in new[] { 16.6f, 20f, 23.4f }) foreach (float pz in new[] { 4.3f, -4.3f })
+                    Box("奶油平台支柱", new Vector3(px, (T - .4f) / 2f, pz), new Vector3(.8f, T - .4f, .8f), wafer, false);
+            // 矮墙 1 m（蹲下是掩体）；北边 x 19.2–21.8、南边 x 19.2–21、东边 z ±1.2 留缺口 = 跳下点；北边 x 21.8–24 是楼梯口；西边 z 1.2–3.6 是坡道口
+            Box("奶油平台矮墙", new Vector3(17.6f, T + .5f, 4.8f), new Vector3(3.2f, 1f, .4f), cream, false);
+            Box("奶油平台矮墙", new Vector3(17.6f, T + .5f, -4.8f), new Vector3(3.2f, 1f, .4f), cream, false);
+            Box("奶油平台矮墙", new Vector3(22.5f, T + .5f, -4.8f), new Vector3(3f, 1f, .4f), cream, false);
+            Box("奶油平台矮墙", new Vector3(16.2f, T + .5f, -2f), new Vector3(.4f, 1f, 6f), cream, false);
+            Box("奶油平台矮墙", new Vector3(16.2f, T + .5f, 4.4f), new Vector3(.4f, 1f, 1.2f), cream, false);
+            Box("奶油平台矮墙", new Vector3(23.8f, T + .5f, -3.1f), new Vector3(.4f, 1f, 3.8f), cream, false);
+            Box("奶油平台矮墙", new Vector3(23.8f, T + .5f, 3.1f), new Vector3(.4f, 1f, 3.8f), cream, false);
+            FrostingEdges(16, 24, -5, 5, T - .08f);
+            Ramp("奶油坡道", new Vector3(16, T, 2.4f), Vector3.left, T, 6f, 2.4f, Candy("rampPink", new Color(1f, .64f, .76f), .35f), cream);   // 西坡道（攻方方向，约 30°）
+            Ramp("威化楼梯", new Vector3(22.9f, T, 5), Vector3.forward, T, 6f, 2.2f, wafer, Candy("waferDark", new Color(.72f, .5f, .26f), .2f));   // 东北角楼梯（守方方向）
+            Food("CakeSlice", new Vector3(17.4f, T + 1f, -4.8f), 200, .7f); Food("Macarons", new Vector3(22.5f, T + 1f, -4.8f), 0, .6f);
+            Sign("奶油平台", new Vector3(15.92f, T + .55f, -2f), -90, new Color(1f, .5f, .7f), .6f);
+            Lamp(new Vector3(20, T + 2.6f, 0), new Color(1f, .85f, .75f), 1.8f, 13f);
+            Lamp(new Vector3(20, 2.4f, 0), new Color(1f, .8f, .7f), 1.4f, 8f);   // 平台下的近战空间
+            spots.Add(new Spot { label = "中层 · 奶油平台（坡道 / 楼梯）", pos = new Vector3(20, T, 0), kind = 0 });
+            afterNav.Add(() => { JumpLink(new Vector3(20, T, -4.3f), new Vector3(20, 0, -6.7f)); JumpLink(new Vector3(20.4f, T, 4.3f), new Vector3(20.4f, 0, 6.7f)); JumpLink(new Vector3(23.3f, T, 0), new Vector3(25.8f, 0, -.4f)); });
+        }
+
+        // 北烤串巷：露天烤串摊 + 灯笼，北端 3.5 m 外卖阳台俯看北长街（西墙坡道上，北缺口跳下）
+        void KebabAlley()
+        {
+            float x0 = LinkX0, x1 = LinkX1, cx = (x0 + x1) / 2; const float T = CreamTop;
+            var floor = Box("烤串巷地面", new Vector3(cx, .014f, 20), new Vector3(x1 - x0, .02f, 20), Pattern("cobble", new Color(.9f, .76f, .66f), new Color(.82f, .66f, .56f), true), false, 0, false); Tile(floor, 3, 10);
+            // 巷内三段错位的高柜台（2.1 m，西-东-西），走位是 S 形：巷子是近战空间，也切断"北长街 → 烤串巷 → 主街 → 后厨 → 南长街"的 98 m 南北直线
+            AlleyCounter("烤炉台", x0, -1.8f, 12.4f, 13.4f, new Color(1f, .45f, .3f), "Skewers");
+            AlleyCounter("烤肠柜", -3.2f, x1, 16f, 17f, new Color(1f, .62f, .3f), "Skewers");
+            AlleyCounter("外卖打包台", x0, -1.8f, 27f, 28f, new Color(1f, .75f, .4f), "MilkTea");
+            Stall(new Vector3(x1 - .8f, 0, 23f), -90, new Color(1f, .6f, .3f), "烤肠");
+            Steam(new Vector3(-3.4f, 2.2f, 12.9f)); Steam(new Vector3(x1 - .8f, 1.25f, 23f));
+            for (int i = 0; i < 4; i++)
+            {
+                float z = 12.5f + i * 4.4f;
+                Glowbox("烤串巷灯笼线", new Vector3(cx, 5.4f, z), new Vector3(x1 - x0, .04f, .04f), Glow(i % 2 == 0 ? new Color(1f, .5f, .3f) : new Color(1f, .8f, .4f), 2.5f));
+                Lamp(new Vector3(cx, 4.8f, z), new Color(1f, .7f, .45f), 1.7f, 8f);
+            }
+            Sign("北烤串巷", new Vector3(x0 + .06f, 4.2f, 17.5f), 90, new Color(1f, .55f, .35f), .7f, true);
+            var wood = Candy("balconyWood", new Color(.8f, .58f, .4f), .25f);
+            Box("外卖阳台", new Vector3(cx, T - .15f, 27.8f), new Vector3(x1 - x0, .3f, 3.6f), wood, false);
+            Box("外卖阳台栏杆", new Vector3(x0 + 1f, T + .5f, 29.45f), new Vector3(2f, 1f, .3f), wood, false);
+            Box("外卖阳台栏杆", new Vector3(x1 - 1f, T + .5f, 29.45f), new Vector3(2f, 1f, .3f), wood, false);
+            Box("外卖阳台栏杆", new Vector3(cx + .8f, T + .5f, 26.15f), new Vector3(4.4f, 1f, .2f), wood, false);
+            foreach (float px in new[] { x0 + .25f, x1 - .25f }) Box("外卖阳台支柱", new Vector3(px, (T - .3f) / 2f, 26.35f), new Vector3(.3f, T - .3f, .3f), wood, false);
+            Ramp("外卖阳台楼梯", new Vector3(x0 + .8f, T, 26f), Vector3.back, T, 6f, 1.6f, wood, Candy("waferDark", new Color(.72f, .5f, .26f), .2f));
+            var umb = Pattern("umbrella", new Color(1f, .6f, .7f), Color.white, false);
+            foreach (float ux in new[] { cx - 1.6f, cx + 1.8f })
+            {
+                Box("阳台遮阳伞杆", new Vector3(ux, T + 1.1f, 27.6f), new Vector3(.08f, 2.2f, .08f), wood, false, 0, false);
+                var u = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Kill(u.GetComponent<Collider>()); u.name = "阳台遮阳伞";
+                u.transform.position = new Vector3(ux, T + 2.25f, 27.6f); u.transform.localScale = new Vector3(2f, .06f, 2f); u.GetComponent<Renderer>().sharedMaterial = umb; u.transform.SetParent(transform, true);
+            }
+            Sign("外卖阳台", new Vector3(cx, T + 1.55f, 29.75f), 0, new Color(1f, .55f, .35f), .5f);
+            spots.Add(new Spot { label = "中层 · 外卖阳台（楼梯）", pos = new Vector3(cx, T, 27.8f), kind = 0 });
+            afterNav.Add(() => JumpLink(new Vector3(cx, T, 29.05f), new Vector3(cx, 0, 31.5f)));
+        }
+
+        // 南后厨：室内厨房（天花板 6 m、门洞 6×4.2 m），烤箱从中庭挪进来，东墙一个蒸汽阀
+        void SouthKitchen()
+        {
+            float x0 = LinkX0, x1 = LinkX1, cx = (x0 + x1) / 2; const float H = 6f;
+            var tile = Pattern("kitchenTile", new Color(1f, .8f, .85f), new Color(.84f, .95f, .89f), true);
+            var wall = Candy("kitchenWall", new Color(.97f, .94f, .92f), .3f);
+            var mint = Candy("kitchenMint", new Color(.6f, .88f, .76f), .35f);
+            var steel = Candy("steel", new Color(.8f, .82f, .86f), .7f);
+            var floor = Box("后厨地砖", new Vector3(cx, .014f, -20), new Vector3(x1 - x0, .02f, 20), tile, false, 0, false); Tile(floor, 3, 10);
+            Box("后厨天花板", new Vector3(cx, H + .2f, -20), new Vector3(x1 - x0, .4f, 20.6f), wall, false);
+            foreach (float z in new[] { -10.15f, -29.85f })
+            {
+                Box("后厨门楣墙", new Vector3(cx, (4.2f + H) / 2f, z), new Vector3(x1 - x0, H - 4.2f, .3f), wall, false);
+                Box("后厨门框", new Vector3(cx, 4.05f, z), new Vector3(x1 - x0, .3f, .5f), mint, false, 0, false);
+                foreach (float px in new[] { x0 + .12f, x1 - .12f }) Box("后厨门框", new Vector3(px, 2.1f, z), new Vector3(.24f, 4.2f, .5f), mint, false, 0, false);
+            }
+            // 和烤串巷同样的西-东-西三段高柜台（2.1 m），后厨里走 S 形
+            AlleyCounter("出餐台", x0, -1.8f, -13.4f, -12.4f, new Color(.8f, .82f, .86f), "Dumpling");
+            AlleyCounter("冷藏柜", -3.2f, x1, -17f, -16f, new Color(.6f, .88f, .76f), "IceCream");
+            AlleyCounter("蒸笼架", x0, -1.8f, -28f, -27f, new Color(.9f, .72f, .45f), "Dumpling");
+            Box("备餐台", new Vector3(-1.6f, .5f, -23f), new Vector3(1f, 1f, 2.4f), steel);
+            Box("调料架", new Vector3(x1 - .3f, 1.1f, -25.8f), new Vector3(.6f, 2.2f, 3f), wall);
+            Box("抽油烟机", new Vector3(x0 + .6f, 3.3f, -19.5f), new Vector3(1.2f, .6f, 2.4f), steel, false, 0, false);
+            Box("墙面瓷砖带", new Vector3(x0 + .03f, 1.6f, -20), new Vector3(.06f, .3f, 19.4f), mint, false, 0, false);
+            Box("墙面瓷砖带", new Vector3(x1 - .03f, 1.6f, -20), new Vector3(.06f, .3f, 19.4f), mint, false, 0, false);
+            Food("Burger", new Vector3(-1.6f, 1f, -22.4f), 20, .4f);
+            foreach (float z in new[] { -13f, -20f, -27f })
+            {
+                Lamp(new Vector3(cx, H - .5f, z), new Color(1f, .88f, .76f), 2.4f, 10f);
+                Glowbox("后厨灯管", new Vector3(cx, H - .04f, z), new Vector3(2.4f, .05f, .3f), Glow(new Color(1f, .95f, .85f), 1.2f));
+            }
+            Steam(new Vector3(x0 + .6f, 1.3f, -19.5f));
+            Sign("南后厨", new Vector3(x1 - .07f, 3.4f, -19f), -90, new Color(1f, .6f, .5f), .8f);
+        }
+
+        // 连接巷 / 后厨里的高柜台：实心 2.1 m（站姿挡胸口、蹲下全挡），顶上摆一样美食
+        void AlleyCounter(string name, float x0, float x1, float z0, float z1, Color c, string food)
+        {
+            float cx = (x0 + x1) / 2, cz = (z0 + z1) / 2;
+            Box(name, new Vector3(cx, 1.05f, cz), new Vector3(x1 - x0, 2.1f, z1 - z0), Candy("counter" + name, Color.Lerp(c, Color.white, .45f), .35f));
+            Box(name + "台面", new Vector3(cx, 2.14f, cz), new Vector3(x1 - x0 + .1f, .08f, z1 - z0 + .12f), Candy("counterTop" + name, c, .5f), false, 0, false);
+            Box(name + "灯条", new Vector3(cx, 1.2f, cz), new Vector3(x1 - x0 + .04f, .12f, z1 - z0 + .04f), Candy("counterBand" + name, c, .5f), false, 0, false);
+            Food(food, new Vector3(cx, 2.18f, cz), 0, .55f);
+            Sign(name, new Vector3(cx, 1.65f, z0 - .06f), 180, c, .4f);
+            Sign(name, new Vector3(cx, 1.65f, z1 + .06f), 0, c, .4f);
+        }
+
+        // A 点汉堡平台：2.0 m（翻越上限 2.05 m 以内），四面都有翻越导航连接；面包 / 肉饼 / 芝士 / 生菜分层
+        void BurgerPlatform(Vector3 c)
+        {
+            const float W = 5.5f, D = 3.6f, H = 2f;
+            var root = new GameObject("汉堡平台"); root.transform.position = c;
+            var bc = root.AddComponent<BoxCollider>(); bc.center = new Vector3(0, H / 2, 0); bc.size = new Vector3(W, H, D);
+            AddBlock(c, new Vector3(W, H, D), 0);
+            var layers = new (float, float, Color, float)[] { (0f, .5f, new Color(.93f, .65f, .32f), 0f), (.5f, .95f, new Color(.42f, .24f, .15f), .06f), (.95f, 1.05f, new Color(1f, .82f, .25f), .22f), (1.05f, 1.2f, new Color(.45f, .8f, .3f), .16f), (1.2f, 2f, new Color(.96f, .68f, .34f), .04f) };
+            for (int i = 0; i < layers.Length; i++)
+            {
+                var l = layers[i];
+                var g = GameObject.CreatePrimitive(PrimitiveType.Cube); Kill(g.GetComponent<Collider>()); g.name = "汉堡平台层";
+                g.transform.SetParent(root.transform, false); g.transform.localPosition = new Vector3(0, (l.Item1 + l.Item2) / 2, 0); g.transform.localScale = new Vector3(W + l.Item4, l.Item2 - l.Item1, D + l.Item4);
+                g.GetComponent<Renderer>().sharedMaterial = Candy("burger" + i, l.Item3, i == 4 ? .45f : .3f);
+            }
+            for (int k = 0; k < 6; k++)
+            {
+                var seed = GameObject.CreatePrimitive(PrimitiveType.Cube); Kill(seed.GetComponent<Collider>()); seed.name = "芝麻";
+                seed.transform.SetParent(root.transform, false); seed.transform.localPosition = new Vector3(-1.9f + k * .75f, H + .01f, (k % 2 == 0 ? .7f : -.6f)); seed.transform.localScale = new Vector3(.22f, .03f, .12f);
+                seed.GetComponent<Renderer>().sharedMaterial = Candy("sesame", new Color(1f, .97f, .88f), .4f);
+            }
+            root.transform.SetParent(transform, true);
+            var rt = root.transform;
+            afterNav.Add(() =>
+            {
+                var pts = new List<(Vector3, Vector3)>();
+                foreach (float x in new[] { -W / 4, W / 4 }) for (int side = -1; side <= 1; side += 2) pts.Add((new Vector3(x, 0, side * (D / 2 + .65f)), new Vector3(x, H, side * (D / 2 - .55f))));
+                for (int side = -1; side <= 1; side += 2) pts.Add((new Vector3(side * (W / 2 + .65f), 0, 0), new Vector3(side * (W / 2 - .55f), H, 0)));
+                foreach (var (a, b) in pts)
+                {
+                    var s = new GameObject("翻越连接起点").transform; s.SetParent(rt, false); s.localPosition = a;
+                    var e = new GameObject("翻越连接终点").transform; e.SetParent(rt, false); e.localPosition = b;
+                    var link = s.gameObject.AddComponent<OffMeshLink>(); link.startTransform = s; link.endTransform = e; link.biDirectional = true; link.costOverride = 4f;
+                    climbLinks++;
+                }
+            });
+            spots.Add(new Spot { label = "高点 · A 点汉堡平台（2.0 m，翻越可上）", pos = c + Vector3.up * H, kind = 0 });
+        }
+
         // ------------------------------------------------------------------ layout
         void Buildings()
         {
@@ -812,26 +1164,33 @@ namespace NeonSiege
             Block("东侧街区", 72, 82, -50, 50, 18, panels);
             // V4：两个街区中间打通小巷（x∈[-24,-18] 与 x∈[-36,-30]），形成新的绕行路线
             Block("北街区公寓", -56, -24, 10, 30, 14, brick);
-            Block("北街区公寓", -18, 14, 10, 30, 16, brick);
+            // V22 第二期：x∈[-5,1] 切开两个楼块 → 北烤串巷 / 南后厨（中段十字连接）
+            Block("北街区公寓", -18, LinkX0, 10, 30, 16, brick);
+            Block("北街区公寓", LinkX1, 14, 10, 30, 16, brick);
             Block("南街区工厂", -56, -36, -30, -10, 13, panels);
-            Block("南街区工厂", -30, 14, -30, -10, 15, panels);
+            Block("南街区工厂", -30, LinkX0, -30, -10, 15, panels);
+            Block("南街区工厂", LinkX1, 14, -30, -10, 15, panels);
             Block("北连廊商铺", 14, 26, 24, 34, 9, brick);
             Block("南连廊仓库", 14, 26, -34, -24, 9, panels);
             Block("中庭市场大楼", 30, 44, -9, 9, 8, concrete);
 
             Facade("modular_urban_apartments_facade", new Vector3(-40f, 0, 10), Vector3.back, 32, 14);
-            Facade("modular_urban_apartments_facade", new Vector3(-2f, 0, 10), Vector3.back, 32, 16);
+            Facade("modular_urban_apartments_facade", new Vector3(-11.5f, 0, 10), Vector3.back, 13, 16);
+            Facade("modular_urban_apartments_facade", new Vector3(7.5f, 0, 10), Vector3.back, 13, 16);
             Facade("modular_factory_facade", new Vector3(-46f, 0, -10), Vector3.forward, 20, 13);
-            Facade("modular_factory_facade", new Vector3(-8f, 0, -10), Vector3.forward, 44, 15);
+            Facade("modular_factory_facade", new Vector3(-17.5f, 0, -10), Vector3.forward, 25, 15);
+            Facade("modular_factory_facade", new Vector3(7.5f, 0, -10), Vector3.forward, 13, 15);
             Facade("modular_urban_apartments_facade", new Vector3(-48, 0, 50), Vector3.back, 46, 18);
             Facade("modular_urban_apartments_facade", new Vector3(0, 0, 50), Vector3.back, 46, 18);
             Facade("modular_factory_facade", new Vector3(-48, 0, -50), Vector3.forward, 46, 18);
             Facade("modular_factory_facade", new Vector3(0, 0, -50), Vector3.forward, 46, 18);
 
             WindowStrips(new Vector3(-56, 0, 30), new Vector3(-24, 0, 30), 14, Vector3.forward, 3);
-            WindowStrips(new Vector3(-18, 0, 30), new Vector3(14, 0, 30), 16, Vector3.forward, 3);
+            WindowStrips(new Vector3(-18, 0, 30), new Vector3(LinkX0, 0, 30), 16, Vector3.forward, 3);
+            WindowStrips(new Vector3(LinkX1, 0, 30), new Vector3(14, 0, 30), 16, Vector3.forward, 3);
             WindowStrips(new Vector3(-56, 0, -30), new Vector3(-36, 0, -30), 13, Vector3.back, 3);
-            WindowStrips(new Vector3(-30, 0, -30), new Vector3(14, 0, -30), 15, Vector3.back, 3);
+            WindowStrips(new Vector3(-30, 0, -30), new Vector3(LinkX0, 0, -30), 15, Vector3.back, 3);
+            WindowStrips(new Vector3(LinkX1, 0, -30), new Vector3(14, 0, -30), 15, Vector3.back, 3);
             WindowStrips(new Vector3(26, 0, 50), new Vector3(72, 0, 50), 20, Vector3.back, 4);
             WindowStrips(new Vector3(26, 0, -50), new Vector3(72, 0, -50), 20, Vector3.forward, 4);
             WindowStrips(new Vector3(72, 0, -50), new Vector3(72, 0, 50), 18, Vector3.left, 4);
@@ -853,6 +1212,9 @@ namespace NeonSiege
             Box("攻方出生区南墙", new Vector3(-69.5f, 2, -10), new Vector3(5, 4, .6f), concrete);
             Box("攻方出生区南墙", new Vector3(-58, 2, -10), new Vector3(4, 4, .6f), concrete);
             Box("攻方出生区顶棚", new Vector3(-64, 4.3f, 0), new Vector3(16, .3f, 20), plate, false, 0, false);
+            // V22 第二期：攻方出生区北侧补给柜（和守方对称）—— 北长街西头 ↔ 南长街西头不再有穿过出生区两个出口的直线
+            Box("攻方补给柜", new Vector3(-63.5f, 1.1f, 5.75f), new Vector3(8, 2.2f, 1.5f), Candy("supplyShelfAtt", new Color(1f, .7f, .45f), .35f));
+            Food("Donut", new Vector3(-61.5f, 2.2f, 5.75f), 0, .9f); Food("MilkTea", new Vector3(-65.5f, 2.2f, 5.75f), 0, 1.2f);
             for (int i = -1; i <= 1; i++) Glowbox("停车位线", new Vector3(-66, .02f, i * 4), new Vector3(5, .02f, .12f), white);
             Sign("攻方集结区", new Vector3(-56.4f, 3.4f, 9.4f), 90, new Color(1f, .45f, .2f), .7f);
             Lamp(new Vector3(-64, 3.8f, -4), new Color(1f, .6f, .3f), 2.2f, 12f); Lamp(new Vector3(-64, 3.8f, 4), new Color(1f, .6f, .3f), 2.2f, 12f);
@@ -865,6 +1227,9 @@ namespace NeonSiege
             Box("守方出生区西墙", new Vector3(56, 2, -6.5f), new Vector3(.6f, 4, 7), concrete);
             Box("守方出生区西墙", new Vector3(56, 2, 6.5f), new Vector3(.6f, 4, 7), concrete);
             Box("守方出生区顶棚", new Vector3(64, 4.3f, 0), new Vector3(16, .3f, 20), plate, false, 0, false);
+            // V22 第二期：守方出生区北侧补给柜（2.2 m）—— 北出口 ↔ 南出口不再是一条 100 m 的直线（东通道南北贯通线）
+            Box("守方补给柜", new Vector3(63.5f, 1.1f, 5.75f), new Vector3(8, 2.2f, 1.5f), Candy("supplyShelf", new Color(.55f, .75f, 1f), .35f));
+            Food("MilkTea", new Vector3(61.5f, 2.2f, 5.75f), 0, 1.2f); Food("Donut", new Vector3(65.5f, 2.2f, 5.75f), 0, .9f);
             Sign("守方安保站", new Vector3(55.6f, 3.4f, 0), -90, new Color(.3f, .7f, 1f), .7f);
             Lamp(new Vector3(64, 3.8f, -4), new Color(.4f, .7f, 1f), 2.2f, 12f); Lamp(new Vector3(64, 3.8f, 4), new Color(.4f, .7f, 1f), 2.2f, 12f);
             noBuild.Add(new Vector3(-64, 10, 0)); noBuild.Add(new Vector3(64, 10, 0));
@@ -875,7 +1240,17 @@ namespace NeonSiege
             string[] names = { "拉面", "电玩城", "义体诊所", "霓虹酒吧", "当铺" };
             Color[] cols = { new Color(1f, .3f, .2f), new Color(.2f, .85f, 1f), new Color(.4f, 1f, .6f), new Color(1f, .2f, .8f), new Color(1f, .7f, .2f) };
             if (ToonAssets.Available) names = new[] { "奶茶", "火锅", "甜品屋", "拉面", "烧烤串串" };   // V15：美食街
-            for (int i = 0; i < 5; i++) Stall(new Vector3(-46 + i * 12, 0, i % 2 == 0 ? .8f : -.8f), i % 2 == 0 ? 0 : 180, cols[i], names[i]);
+            for (int i = 0; i < 5; i++)
+            {
+                if (i == 2) { Stall(new Vector3(-23.85f, 0, 0), -90, cols[i], names[i]); continue; }   // V22：甜品屋挂在高摊位岛西侧（原位置被岛占了）
+                Stall(new Vector3(-46 + i * 12, 0, i % 2 == 0 ? .8f : -.8f), i % 2 == 0 ? 0 : 180, cols[i], names[i]);
+            }
+            // V22 第二期：高摊位岛（实心 2.5 m）把主街分成南北两道；两侧外摆棚错位，把每条侧道切成 ≤ 48 m
+            StallIsland(-23f, -15f, -5.5f, 5.5f);
+            Awning("外摆棚 · 冰饮", -38f, -34f, 5f, 10f, new Color(.55f, .85f, 1f), "Popsicle", 180);
+            Awning("外摆棚 · 甜甜圈", -12f, -8f, -10f, -5f, new Color(1f, .55f, .75f), "Donut", 0);
+            Awning("外摆棚 · 烤肠", -12f, -8f, 5f, 10f, new Color(1f, .62f, .35f), "Skewers", 180);
+            Awning("外摆棚 · 冰粉", -30f, -26f, -10f, -5f, new Color(.6f, .9f, .75f), "IceCream", 0);
             Box("人行道", new Vector3(-21, .06f, 8.6f), new Vector3(70, .12f, 2.8f), pavement, false);
             Box("人行道", new Vector3(-21, .06f, -8.6f), new Vector3(70, .12f, 2.8f), pavement, false);
             Sign("药房24H", new Vector3(-50, 6.5f, 9.3f), 180, new Color(.3f, 1f, .5f), .8f, true);
@@ -887,15 +1262,15 @@ namespace NeonSiege
             // V8：取消檐口霓虹灯带
             for (int i = 0; i < 4; i++)
             {
-                Window(new Vector3(-44 + i * 16, .9f, 9.75f), 180, new Color(1f, .5f, .8f));
-                Window(new Vector3(i == 0 ? -42 : -36 + i * 16, .9f, -9.75f), 0, new Color(.4f, .9f, 1f));
+                Window(new Vector3(i == 2 ? -20.5f : -44 + i * 16, .9f, 9.75f), 180, new Color(1f, .5f, .8f));   // V22：x=-12 那扇让给外摆棚
+                Window(new Vector3(i == 0 ? -42 : i == 2 ? 7 : -36 + i * 16, .9f, -9.75f), 0, new Color(.4f, .9f, 1f));   // V22：x=-4 那扇挪开（南后厨门口）
             }
             StreetLamp(new Vector3(-50, .1f, -8.4f), 0, new Color(1f, .78f, .55f));
             StreetLamp(new Vector3(-28, .1f, 8.4f), 180, new Color(1f, .78f, .55f));
-            StreetLamp(new Vector3(-4, .1f, -8.4f), 0, new Color(1f, .78f, .55f));
-            PH("utility_box_02", new Vector3(-36, .12f, 8.9f), 180, new Vector3(1.1f, 0, 0));
+            StreetLamp(new Vector3(-7, .1f, -8.4f), 0, new Color(1f, .78f, .55f));          // V22：原 x=-4 挡南后厨门口
+            PH("utility_box_02", new Vector3(-32f, .12f, 8.9f), 180, new Vector3(1.1f, 0, 0));   // V22：原 x=-36 被外摆棚占了
             PH("metal_trash_can", new Vector3(-18, .12f, -8.8f), 0, new Vector3(1.85f, 0, 0));
-            PH("modular_street_seating", new Vector3(-30, .12f, -8.6f), 0, new Vector3(3.5f, 0, 0));
+            PH("modular_street_seating", new Vector3(-41.5f, .12f, -9f), 0, new Vector3(3.5f, 0, 0));   // V22：原 x=-30 让给外摆棚
             PH("WetFloorSign_01", new Vector3(-24, 0, 6.5f), 30, new Vector3(0, .63f, 0), false);
             Puddle(new Vector3(-40, 0, 4), 3.5f, 2f, 20); Puddle(new Vector3(-14, 0, -4.5f), 4f, 2.4f, -15); Puddle(new Vector3(6, 0, 5), 3f, 1.7f, 40);
             Steam(new Vector3(-32, .02f, -3.8f)); Steam(new Vector3(0, .02f, 3.5f));
@@ -919,20 +1294,21 @@ namespace NeonSiege
             Box("人行道", new Vector3(-23, .06f, 48.6f), new Vector3(98, .12f, 2.8f), pavement, false);
             Container(new Vector3(-40, 0, 41), 0, new Color(.2f, .45f, .65f));
             Container(new Vector3(-12, 0, 44), 90, new Color(.7f, .3f, .2f), 2);
-            Container(new Vector3(8, 0, 38), 0, new Color(.25f, .55f, .35f));
+            // V22：原 (8, 38) 的方块和冰柜仓重叠 → 挪到关口东侧当"第二道"错位掩体（两层，和冰柜仓一起把门洞后的直线切断）
+            Container(new Vector3(17, 0, 42f), 90, new Color(.25f, .55f, .35f), 2);
             PH("metal_trash_can", new Vector3(-54, .12f, 48.6f), 180, new Vector3(1.85f, 0, 0));
-            PH("utility_box_01", new Vector3(-30, .12f, 49f), 180, new Vector3(.6f, 0, 0));
-            PH("old_tyre", new Vector3(-26, .3f, 46f), 0, new Vector3(.8f, 0, 0), false);
+            PH("utility_box_01", new Vector3(-24.5f, .12f, 49f), 180, new Vector3(.6f, 0, 0));   // V22：原 x=-30 在寿司吧里
+            PH("old_tyre", new Vector3(-23.5f, .3f, 46f), 0, new Vector3(.8f, 0, 0), false);
             PH("propane_tank", new Vector3(-2, 0, 47.8f), 0, new Vector3(0, .8f, 0));
             PH("concrete_road_barrier", new Vector3(-24, 0, 37), 0, new Vector3(0, 1.05f, 0));
-            TWall(new Vector3(16, 0, 44), 90);
+            TWall(new Vector3(23.5f, 0, 35.4f), 0);   // V22：原 (16, 44) 和第二道方块重叠；和方块之间留 3 m 通道
             StreetLamp(new Vector3(-48, .1f, 31.4f), 180, new Color(1f, .5f, .85f));
             StreetLamp(new Vector3(-20, .1f, 48.6f), 0, new Color(.5f, .85f, 1f));
             StreetLamp(new Vector3(6, .1f, 31.4f), 180, new Color(1f, .78f, .55f));
             Sign("A 长街 →", new Vector3(-62, 4.5f, 49.4f), 180, new Color(1f, .45f, .2f), .9f);
-            Sign("霓城快运", new Vector3(-30, 9f, 49.4f), 180, new Color(.2f, .85f, 1f), 1.6f);
+            Sign("霓城快运", new Vector3(-15, 9f, 49.4f), 180, new Color(.2f, .85f, 1f), 1.6f);
             Sign("胶囊旅馆", new Vector3(20, 7f, 34.5f), 0, new Color(1f, .2f, .7f), .9f, true);
-            Puddle(new Vector3(-34, 0, 38), 4, 2, 10); Puddle(new Vector3(0, 0, 42), 3, 2, -30);
+            Puddle(new Vector3(-40, 0, 36.6f), 4, 2, 10); Puddle(new Vector3(0, 0, 42), 3, 2, -30);   // V22：原 (-34, 38) 在寿司吧里
             Steam(new Vector3(-16, .02f, 38));
             Container(new Vector3(-66, 0, 24), 90, new Color(.6f, .5f, .2f));
             PH("concrete_road_barrier", new Vector3(-62, 0, 34), 90, new Vector3(0, 1.05f, 0));
@@ -943,21 +1319,22 @@ namespace NeonSiege
         {
             Box("人行道", new Vector3(-21, .06f, -31.4f), new Vector3(70, .12f, 2.8f), pavement, false);
             Box("人行道", new Vector3(-23, .06f, -48.6f), new Vector3(98, .12f, 2.8f), pavement, false);
-            Container(new Vector3(-36, 0, -42), 0, new Color(.7f, .35f, .15f), 2);
+            Container(new Vector3(-40, 0, -45.5f), 0, new Color(.7f, .35f, .15f), 2);   // V22：原 (-36, -42) 和南寿司吧重叠
             Container(new Vector3(-8, 0, -38), 90, new Color(.25f, .4f, .6f));
             Container(new Vector3(10, 0, -45), 0, new Color(.5f, .5f, .5f));
+            Container(new Vector3(19.5f, 0, -42f), 90, new Color(.55f, .4f, .65f), 2);   // V22：关口东侧第二道错位掩体
             PH("portable_generator", new Vector3(-50, 0, -47.5f), 0, new Vector3(1f, 0, 0));
             PH("Barrel_01", new Vector3(-22, 0, -47.8f), 0, new Vector3(0, .9f, 0));
             PH("barrel_03", new Vector3(-21.2f, 0, -47.2f), 40, new Vector3(0, .9f, 0));
             PH("cardboard_box_01", new Vector3(-16, .12f, -48.6f), 15, new Vector3(.6f, 0, 0), false);
             PH("concrete_road_barrier", new Vector3(-20, 0, -37), 0, new Vector3(0, 1.05f, 0));
-            TWall(new Vector3(18, 0, -40), 90);
+            TWall(new Vector3(23.5f, 0, -35.4f), 0);   // V22：原 (18, -40) 和第二道方块重叠；和方块之间留 3 m 通道
             StreetLamp(new Vector3(-44, .1f, -31.4f), 0, new Color(1f, .78f, .55f));
             StreetLamp(new Vector3(-12, .1f, -48.6f), 180, new Color(.5f, .85f, 1f));
             Sign("B 工厂通道 →", new Vector3(-62, 4.5f, -49.4f), 0, new Color(1f, .45f, .2f), .9f);
-            Sign("棱能集团 · 第七工厂", new Vector3(-24, 10f, -49.4f), 0, new Color(1f, .65f, .2f), 1.4f);
+            Sign("棱能集团 · 第七工厂", new Vector3(-12, 10f, -49.4f), 0, new Color(1f, .65f, .2f), 1.4f);
             for (int i = 0; i < 3; i++) PH("rollershutter_window_01", new Vector3(-48 + i * 20, .12f, -30.25f), 180, new Vector3(5f, 0, 0), false);
-            Puddle(new Vector3(-28, 0, -40), 4, 2.4f, -10); Puddle(new Vector3(4, 0, -36), 3, 2, 25);
+            Puddle(new Vector3(-40, 0, -36.6f), 4, 2.4f, -10); Puddle(new Vector3(4, 0, -36), 3, 2, 25);   // V22：原 (-28, -40) 在南寿司吧里
             Steam(new Vector3(-6, .02f, -44));
             Container(new Vector3(-66, 0, -26), 90, new Color(.3f, .5f, .5f));
             PH("concrete_road_barrier", new Vector3(-62, 0, -36), 90, new Vector3(0, 1.05f, 0));
@@ -977,15 +1354,16 @@ namespace NeonSiege
             Sign("全息广告 · 棱能饮料", new Vector3(29.9f, 5.5f, 0), -90, new Color(1f, .2f, .7f), .8f);
             // V7：市场楼顶改为狙击位，原屋顶灯带取消
             PH("concrete_road_barrier", new Vector3(26, 0, 3), 90, new Vector3(0, 1.05f, 0));
-            TWall(new Vector3(48, 0, 12), 0);
-            TWall(new Vector3(48, 0, -12), 0);
+            TWall(new Vector3(47.6f, 0, 12), 0);    // V22：西移 0.4 m，和楼顶楼梯 / 东南方块首尾相接，不留缝
+            TWall(new Vector3(47.6f, 0, -12), 0);
             Container(new Vector3(52, 0, 30), 90, new Color(.55f, .2f, .2f));
             Container(new Vector3(52, 0, -30), 90, new Color(.2f, .35f, .55f));
+            Container(new Vector3(45.3f, 0, -9), 90, new Color(.9f, .55f, .65f));   // V22：市场东南角，和楼梯对称，切断 x≈45 的南北直线
             StreetLamp(new Vector3(27, .1f, 12), 90, new Color(.5f, .85f, 1f));
-            StreetLamp(new Vector3(47, .1f, -12), -90, new Color(1f, .78f, .55f));
-            PH("utility_box_01", new Vector3(50, 0, 16), 0, new Vector3(.6f, 0, 0));
+            StreetLamp(new Vector3(50.5f, .1f, -12.5f), -90, new Color(1f, .78f, .55f));   // V22：原 (47, -12) 和 T 墙重叠
+            PH("utility_box_01", new Vector3(48.6f, 0, 22.5f), 0, new Vector3(.6f, 0, 0));  // V22：原 (50, 16) 被奶茶亭占了
             Puddle(new Vector3(22, 0, -4), 4, 2, 15); Puddle(new Vector3(50, 0, 4), 3, 2, -20);
-            Steam(new Vector3(24, .02f, 6));
+            Steam(new Vector3(26.5f, .02f, 6));
         }
 
         PowerBox NewPowerBox(string zone, Vector3 p, float rotY)
@@ -1003,8 +1381,11 @@ namespace NeonSiege
             Box("A点东墙", new Vector3(48, 1.75f, 34), new Vector3(.6f, 3.5f, 16), concrete);
             Container(new Vector3(31, 0, 41), 0, new Color(.75f, .45f, .1f), 2);
             Container(new Vector3(43, 0, 30), 90, new Color(.2f, .45f, .6f), 2);
-            Container(new Vector3(33, 0, 26), 0, new Color(.6f, .2f, .2f));
+            BurgerPlatform(new Vector3(33, 0, 26.5f));   // V22 第二期：A 点汉堡平台（原蛋糕方块位置，2.0 m，翻越可上）
             Container(new Vector3(30, 0, 47.5f), 0, new Color(.3f, .3f, .35f));
+            // V22 第二期：A 点北侧两块方块 —— 长街东段 / 东通道之间不再有穿过 A 北沿的 > 60 m 直线，也给长街口多一个掩体
+            Container(new Vector3(40, 0, 45), 90, new Color(.95f, .7f, .35f));
+            Container(new Vector3(44.5f, 0, 48.6f), 0, new Color(.55f, .8f, .6f));
             PH("portable_generator", new Vector3(39, 0, 40), 30, new Vector3(1.1f, 0, 0));
             PH("old_military_crate", new Vector3(36, 0, 44), 0, new Vector3(1.9f, 0, 0));
             PH("metal_jerrycan", new Vector3(40, 0, 25), 10, new Vector3(0, .5f, 0), false);
@@ -1027,7 +1408,7 @@ namespace NeonSiege
             zoneB = NewPowerBox("B 点", new Vector3(27.6f, 0, -45), 90);
             Box("B厂房北墙", new Vector3(32.5f, 2.5f, -18), new Vector3(3, 5, .6f), iron);
             Box("B厂房北墙", new Vector3(43, 2.5f, -18), new Vector3(2, 5, .6f), iron);
-            Box("B厂房北墙窗台", new Vector3(38, .5f, -18), new Vector3(8, 1f, .6f), iron);
+            Box("B厂房北墙窗台", new Vector3(38, .825f, -18), new Vector3(8, 1.65f, .6f), iron);   // V22：窗台 1.0 → 1.65 m（打碎玻璃后仍能翻进去），主街 → B 北窗 → 东通道的 70 m 斜线被挡
             Box("B厂房北墙上沿", new Vector3(38, 4.3f, -18), new Vector3(8, 1.4f, .6f), iron, false);
             Box("B门框", new Vector3(29, 4.1f, -18), new Vector3(4.6f, 1.8f, .8f), iron, false);
             BreakableWall("B厂房西墙（可破坏）", new Vector3(27, 0, -46), 90, 8, 5f);
@@ -1036,8 +1417,8 @@ namespace NeonSiege
             for (int i = 0; i < 5; i++) Box("屋顶钢梁", new Vector3(28 + i * 4.5f, 6.6f, -34), new Vector3(.3f, .4f, 24), plate, false, 0, false);
             for (int i = 0; i < 4; i++)
             {
-                var g = new GameObject("B厂房玻璃"); g.transform.position = new Vector3(35 + i * 2f, 1f, -18); g.transform.SetParent(transform, true);
-                var gp = g.AddComponent<GlassPanel>(); gp.Build(new Vector3(2f, 2.6f, .06f), new Color(.5f, .8f, 1f)); glass.Add(gp);
+                var g = new GameObject("B厂房玻璃"); g.transform.position = new Vector3(35 + i * 2f, 1.65f, -18); g.transform.SetParent(transform, true);
+                var gp = g.AddComponent<GlassPanel>(); gp.Build(new Vector3(2f, 1.95f, .06f), new Color(.5f, .8f, 1f)); glass.Add(gp);
             }
             PH("steel_frame_shelves_01", new Vector3(30.5f, 0, -27), 90, new Vector3(0, 3.6f, 0));
             PH("steel_frame_shelves_01", new Vector3(45, 0, -42), 0, new Vector3(0, 3.6f, 0));
@@ -1203,7 +1584,7 @@ namespace NeonSiege
             PH("portable_welding_cart", new Vector3(29f, 0, -33), 90, new Vector3(0, 1.1f, 0));
             for (int i = 0; i < 3; i++) PH("hanging_industrial_lamp", new Vector3(31 + i * 6, 5.2f, -40), 0, new Vector3(0, 1.4f, 0), false, false);
             // street furniture
-            foreach (var h in new[] { new Vector3(-44, .12f, 9.2f), new Vector3(-10, .12f, -9.2f), new Vector3(-40, .12f, 31.6f), new Vector3(-20, .12f, -31.6f), new Vector3(10, .12f, 48.8f) })
+            foreach (var h in new[] { new Vector3(-44, .12f, 9.2f), new Vector3(-13.6f, .12f, -9.2f), new Vector3(-40, .12f, 31.6f), new Vector3(-20, .12f, -31.6f), new Vector3(10, .12f, 48.8f) })   // V22：(-10,-9.2) 让给外摆棚
                 PH("fire_hydrant", h, 0, new Vector3(0, .8f, 0));
             foreach (var w in new[] { (new Vector3(-56.2f, 3.2f, 6), 90f), (new Vector3(13.8f, 3.2f, -6), -90f), (new Vector3(47.7f, 3.4f, -28), -90f) })
                 PH("industrial_wall_lamp", w.Item1, w.Item2, new Vector3(0, .5f, 0), false, false);
@@ -1327,8 +1708,10 @@ namespace NeonSiege
             SniperPerch("北长街西（攻）", new Vector3(-68, 0, 46), 90, Vector3.back);
             SniperPerch("南长街西（攻）", new Vector3(-68, 0, -46), 90, Vector3.forward);
             SniperPerch("主街水塔（攻）", new Vector3(-45, 0, 7.6f), 90, Vector3.back, 6f, false);
+            afterNav.Add(() => JumpLink(new Vector3(-46.2f, 6f, 7.6f), new Vector3(-48.6f, 0, 7.6f)));   // V22：水塔西沿跳下（AI 离开狙击位时不再困在台上）
             SniperPerch("A 长街（守）", new Vector3(23, 0, 47.5f), -90, Vector3.left);
             SniperPerch("B 长街（守）", new Vector3(23, 0, -47.5f), -90, Vector3.left);
+            // 注：4 个楼梯狙击台保留，原来 91 m 的对望被寿司吧 / 糖果铺 / 冰柜仓切断
             // 防守位：每个包点两处，面向主要进攻入口
             Bunker("A 点长街口", new Vector3(41, 0, 37), -100);
             Bunker("A 点连廊口", new Vector3(44, 0, 23.5f), -125);
@@ -1336,8 +1719,23 @@ namespace NeonSiege
             Bunker("B 点连廊口", new Vector3(38, 0, -22.5f), 180);
             PlantPad("A", SiteA); PlantPad("B", SiteB);
             MarketRoof();
-            Checkpoint("北铁门检查站", 40f);
-            Checkpoint("南铁门检查站", -40f);
+            Checkpoint("北关口", 40f);
+            Checkpoint("南关口", -40f);
+            // V22 第二期：关口西侧一摞蒸笼（2.2 m，实心）—— 攻方到门口有个掩体；从寿司吧 / 外卖铺之间斜穿过来再穿过门洞的直线被挡住
+            foreach (float s in new[] { 1f, -1f }) SteamerStack(new Vector3(-7.75f, 0, s * 39.75f));
+        }
+
+        void SteamerStack(Vector3 c)
+        {
+            var bamboo = Candy("bamboo", new Color(.9f, .72f, .45f), .3f); var rim = Candy("bambooRim", new Color(.7f, .5f, .28f), .25f);
+            Box("关口蒸笼堆", c + Vector3.up * 1.1f, new Vector3(2.5f, 2.2f, 4.5f), bamboo, true, 0, true).GetComponent<Renderer>().enabled = false;   // 碰撞 + 小地图；外观是下面的蒸笼
+            for (int i = 0; i < 3; i++)
+            {
+                var t = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Kill(t.GetComponent<Collider>()); t.name = "关口蒸笼";
+                t.transform.position = c + Vector3.up * (.37f + i * .73f); t.transform.localScale = new Vector3(2.6f, .35f, 4.6f);
+                t.GetComponent<Renderer>().sharedMaterial = i % 2 == 0 ? bamboo : rim; t.transform.SetParent(transform, true);
+            }
+            Food("Dumpling", c + Vector3.up * 2.2f, 0, .8f);
         }
 
         // 市场楼顶狙击位：8 m 高，四周矮墙，俯瞰整条夜市主街；只能从楼东侧弹射板上去
@@ -1347,9 +1745,21 @@ namespace NeonSiege
             for (int i = -1; i <= 1; i += 2)
             {
                 Box("楼顶矮墙", new Vector3(37, Y + .5f, i * 8.85f), new Vector3(14, 1f, .3f), concrete, false);
-                Box("楼顶矮墙", new Vector3(37 + i * 6.85f, Y + .5f, i * 4.5f), new Vector3(.3f, 1f, 8.7f), concrete, false);
+                if (i > 0) Box("楼顶矮墙", new Vector3(43.85f, Y + .5f, 5.25f), new Vector3(.3f, 1f, 7.2f), concrete, false);   // V22：东墙北段让出楼梯口（z 0.15–1.65）
+                else Box("楼顶矮墙", new Vector3(37 + i * 6.85f, Y + .5f, i * 4.5f), new Vector3(.3f, 1f, 8.7f), concrete, false);
                 Box("楼顶矮墙", new Vector3(37 + i * 6.85f, Y + .5f, -i * 6.6f), new Vector3(.3f, 1f, 4.2f), concrete, false);   // west/east gaps → firing slots
             }
+            // V22 第二期：东侧楼梯 —— 守方可以走上来、也能走下去（原来只能弹上、只能跳下）。
+            // 平台 8 m（楼体顶面，和弹射板落点同高），坡道沿楼东侧向北 14 m（约 30°，和狙击台楼梯同一手感，NavMesh 坡度上限 40°）
+            Box("楼顶楼梯平台", new Vector3(45.05f, RoofTop - .15f, .2f), new Vector3(2.5f, .3f, 2.8f), plate, false);
+            Box("楼顶楼梯栏杆", new Vector3(46.25f, RoofTop + .5f, .2f), new Vector3(.12f, 1f, 2.8f), plate, false);
+            Ramp("楼顶楼梯", new Vector3(45.2f, RoofTop, 1.6f), Vector3.forward, RoofTop, 14f, 2.2f, Candy("wafer", new Color(.93f, .72f, .42f), .25f), Candy("waferDark", new Color(.72f, .5f, .26f), .2f));
+            for (int k = 1; k <= 3; k++) Box("楼梯立柱", new Vector3(46.2f, RoofTop * (1 - k / 4f) / 2f, 1.6f + 14f * k / 4f), new Vector3(.25f, RoofTop * (1 - k / 4f), .25f), plate, false);
+            Sign("楼顶楼梯 ↑", new Vector3(45.2f, 2.9f, 15.75f), 0, new Color(1f, .5f, .3f), .5f);
+            // V22：楼梯下的奶茶仓（实心 2 m，在坡道下沿以下）+ 东北角可乐冰柜 —— 和 T 墙首尾相接，主街 / 中庭的斜线不再从市场东北角穿到东通道
+            Box("楼梯下奶茶仓", new Vector3(45.2f, 1f, 6.8f), new Vector3(2.2f, 2f, 9.6f), Candy("kioskStore", new Color(.95f, .82f, .7f), .3f));
+            Box("可乐冰柜", new Vector3(47.55f, 1.1f, 13.55f), new Vector3(2.3f, 2.2f, 2.9f), Candy("colaFridge", new Color(.85f, .25f, .3f), .5f));
+            Box("可乐冰柜", new Vector3(47.55f, 1.1f, -13.55f), new Vector3(2.3f, 2.2f, 2.9f), Candy("colaFridge", new Color(.85f, .25f, .3f), .5f));
             Box("楼顶通风机", new Vector3(39, Y + .6f, 3), new Vector3(2, 1.2f, 2), plate, false);
             Box("楼顶水箱", new Vector3(35, Y + .9f, -4), new Vector3(1.6f, 1.8f, 1.6f), iron, false);
             PH("wooden_military_crate", new Vector3(32, Y, 5), 90, new Vector3(0, .75f, 0));
@@ -1357,7 +1767,7 @@ namespace NeonSiege
             var jp = padGo.AddComponent<JumpPad>(); jp.Build(new Color(1f, .45f, .3f)); jp.AimAt(new Vector3(41f, Y, -2f), 3f);
             padGo.transform.SetParent(transform, true);
             Sign("弹射板 ↑ 楼顶狙击位", new Vector3(44.1f, 3.2f, -6.5f), 90, new Color(1f, .5f, .3f), .5f);
-            spots.Add(new Spot { label = "狙击位 · 市场楼顶（弹射板）", pos = new Vector3(37, Y, 0), kind = 0 });
+            spots.Add(new Spot { label = "狙击位 · 市场楼顶（楼梯 / 弹射板）", pos = new Vector3(37, Y, 0), kind = 0 });
             noBuild.Add(new Vector3(37, Y, 0));
         }
 
@@ -1390,15 +1800,16 @@ namespace NeonSiege
             Box("铁丝网横线", new Vector3(X, wallH + .45f, (zMin + zMax) / 2), new Vector3(.04f, .04f, zMax - zMin), iron, false, 0, false);
             afterNav.Add(() =>
             {
-                var go = new GameObject(label + "铁门"); go.name = label + "铁门";
-                go.transform.position = new Vector3(X, 0, z); go.transform.rotation = Quaternion.Euler(0, 90, 0);   // slides toward +z/-z inside the wall
+                // V22 第二期：铁门 → 蒸笼门。默认开着（蒸笼升到门楣上方），守方长按 G 盖上（巨响），攻方长按 G 掀开；墙洞保留
+                var go = new GameObject(label + "蒸笼门");
+                go.transform.position = new Vector3(X, 0, z); go.transform.rotation = Quaternion.Euler(0, 90, 0);
                 var gate = go.AddComponent<Shutter>(); gate.BuildGate(gateW, 3.8f, plate); go.transform.SetParent(transform, true); shutters.Add(gate);
             });
             noBuild.Add(new Vector3(X, 3f, z));
             // guard booth + warning signs on both faces
             Box("岗亭", new Vector3(X - 2.2f, 1.3f, z - (z > 0 ? 6.5f : -6.5f)), new Vector3(2.2f, 2.6f, 2.2f), panels);   // away from the wall hole
-            Sign(label + " · 长按 G 开启铁门", new Vector3(X - .45f, 4.9f, z), -90, new Color(1f, .4f, .2f), .5f);
-            Sign(label + " · 长按 G 开启铁门", new Vector3(X + .45f, 4.9f, z), 90, new Color(1f, .4f, .2f), .5f);
+            Sign(label + " · 蒸笼门默认开 · 守方可盖上", new Vector3(X - .45f, 4.9f, z), -90, new Color(1f, .6f, .3f), .5f);
+            Sign(label + " · 长按 G 盖上 / 掀开蒸笼", new Vector3(X + .45f, 4.9f, z), 90, new Color(1f, .6f, .3f), .5f);
             Lamp(new Vector3(X - 1.2f, 4.2f, z), new Color(1f, .7f, .45f), 1.6f, 9f);
             Lamp(new Vector3(X + 1.2f, 4.2f, z), new Color(1f, .7f, .45f), 1.6f, 9f);
         }
@@ -1508,10 +1919,10 @@ namespace NeonSiege
 
             LightCover(new Vector3(-16, 0, -6), 0); LightCover(new Vector3(6, 0, 6.5f), 0);
             LightCover(new Vector3(36, 0, 30), 90); LightCover(new Vector3(36, 0, -30), 0);
-            LightCover(new Vector3(-30, 0, 44), 0); LightCover(new Vector3(-28, 0, -44), 0);
+            LightCover(new Vector3(-22, 0, 34.2f), 0); LightCover(new Vector3(-22, 0, -34.2f), 0);   // V22：原 (-30, 44) / (-28, -44) 在寿司吧里 → 挪到北/南小巷口
             LightCover(new Vector3(20, 0, 2), 90);
 
-            Barrel(new Vector3(-28, 0, 7.2f)); Barrel(new Vector3(40.5f, 0, 44.5f)); Barrel(new Vector3(33, 0, -44)); Barrel(new Vector3(-6, 0, -46.5f));
+            Barrel(new Vector3(-28, 0, 7.2f)); Barrel(new Vector3(37.5f, 0, 46.5f)); Barrel(new Vector3(33, 0, -44)); Barrel(new Vector3(-6, 0, -46.5f));   // V22：A 点那只从 (40.5, 44.5) 让给新方块
             Barrel(new Vector3(-4, 0, 46)); Barrel(new Vector3(46, 0, 19.2f)); Barrel(new Vector3(23, 0, -9));
 
             Med(new Vector3(-55.2f, 0, -6.5f), 90); Med(new Vector3(55.3f, 0, 14), -90);
@@ -1609,8 +2020,11 @@ namespace NeonSiege
             // skybridge over the main street (decorative, neon underside)
             Box("空中连廊", new Vector3(-8, 8.2f, 0), new Vector3(5, 1.4f, 20), concrete, false);
             // V7：连廊顶可站人 —— 两侧弹射板上去，矮栏杆做掩体，攻守都能抢的中路高点
-            for (int i = -1; i <= 1; i += 2) Box("连廊栏杆", new Vector3(-8 + i * 2.4f, 9.2f, 0), new Vector3(.2f, .6f, 20), plate, false);
-            Box("连廊沙袋", new Vector3(-8, 9.3f, -6), new Vector3(3, .8f, .6f), concrete, false); Box("连廊沙袋", new Vector3(-8, 9.3f, 6), new Vector3(3, .8f, .6f), concrete, false);
+            // V22：东侧栏杆两头各让出 3 m —— 从连廊跳下正好落到北烤串巷 / 南后厨门口（单向导航连接，见 JumpLink）
+            Box("连廊栏杆", new Vector3(-10.4f, 9.2f, 0), new Vector3(.2f, .6f, 20), plate, false);
+            Box("连廊栏杆", new Vector3(-5.6f, 9.2f, 0), new Vector3(.2f, .6f, 14), plate, false);
+            foreach (float s in new[] { 1f, -1f }) afterNav.Add(() => JumpLink(new Vector3(-6.4f, 8.9f, s * 8.6f), new Vector3(-3.4f, 0, s * 7.6f)));
+            Box("连廊沙袋", new Vector3(-8.4f, 9.3f, -6), new Vector3(2.2f, .8f, .6f), concrete, false); Box("连廊沙袋", new Vector3(-8.4f, 9.3f, 6), new Vector3(2.2f, .8f, .6f), concrete, false);   // V22：缩短 0.8 m，东侧留 1.6 m 让 NavMesh 连到两头的跳下口
             foreach (var pad in new[] { (new Vector3(-14.5f, 0, -3), new Vector3(-8.5f, 8.9f, -3), "西"), (new Vector3(-1.5f, 0, 3), new Vector3(-7.5f, 8.9f, 3), "东") })
             {
                 var pg = new GameObject("弹射板 空中连廊" + pad.Item3); pg.transform.position = pad.Item1;
@@ -1623,15 +2037,15 @@ namespace NeonSiege
             Sign("霓城快线", new Vector3(-8, 9.3f, -10.1f), 0, new Color(.2f, .9f, 1f), .9f);
             // neon arches over main entrances
             Arch(new Vector3(-53, 0, 0), 90, 14f, new Color(1f, .25f, .75f), "旧港夜市");
-            Arch(new Vector3(12, 0, 0), -90, 14f, new Color(.2f, .9f, 1f), "中庭");
-            Arch(new Vector3(-50, 0, 40), 90, 15f, new Color(1f, .6f, .2f), "北长街");
-            Arch(new Vector3(-50, 0, -40), 90, 15f, new Color(.6f, .3f, 1f), "南工厂通道");
+            // V22：x=12 的"中庭"门楼换成牌楼横幅（PlazaV22）；长街门楼挪到糖果铺东边（原 x=-50 的立柱插进糖果铺）
+            Arch(new Vector3(-41, 0, 40), 90, 15f, new Color(1f, .6f, .2f), "北长街");
+            Arch(new Vector3(-41, 0, -40), 90, 15f, new Color(.6f, .3f, 1f), "南工厂通道");
             // holographic billboards on rooftops
             // vending machines & AC units along the streets
-            Vending(new Vector3(-36, 0, 8.6f), 180, new Color(.2f, .9f, 1f)); Vending(new Vector3(-16, 0, 8.6f), 180, new Color(1f, .3f, .7f));
+            Vending(new Vector3(-33.4f, 0, 8.6f), 180, new Color(.2f, .9f, 1f)); Vending(new Vector3(-16, 0, 8.6f), 180, new Color(1f, .3f, .7f));   // V22：原 x=-36 被外摆棚占了
             Vending(new Vector3(-44, 0, -8.6f), 0, new Color(1f, .6f, .2f)); Vending(new Vector3(4, 0, -8.6f), 0, new Color(.3f, 1f, .6f));
-            Vending(new Vector3(-44, 0, 31.6f), 0, new Color(1f, .3f, .7f)); Vending(new Vector3(-8, 0, -31.6f), 180, new Color(.2f, .9f, 1f));
-            Vending(new Vector3(50.5f, 0, 20), -90, new Color(.6f, .3f, 1f));
+            Vending(new Vector3(-42.6f, 0, 31.6f), 0, new Color(1f, .3f, .7f)); Vending(new Vector3(-8.3f, 0, -31.6f), 180, new Color(.2f, .9f, 1f));   // V22：糖果铺 / 外卖铺让位
+            Vending(new Vector3(48.3f, 0, 21.2f), -90, new Color(.6f, .3f, 1f));   // V22：原 (50.5, 20) 被奶茶亭占了
             foreach (var x in new[] { -50f, -40f, -12f, 2f }) { AC(new Vector3(x, 6f + (x % 3), 10.1f), 180); AC(new Vector3(x + 4, 5.5f, -10.1f), 0); }
             // ground neon guide lines along the main street edges
             // V8：取消地面霓虹线（改为路面标线贴花）
@@ -1671,10 +2085,20 @@ namespace NeonSiege
             FloorText("A 连廊", new Vector3(20, 0, 19), 0, new Color(1f, .55f, .2f), 1f);
             FloorText("B 连廊", new Vector3(20, 0, -19), 180, new Color(.3f, .8f, 1f), 1f);
             FloorText("中央市场", new Vector3(50, 0, 0), -90, new Color(.3f, 1f, .9f), 1.2f);
+            // V22 第二期：新区域地面字
+            FloorText("北烤串巷", new Vector3(-2, 0, 18.5f), 0, new Color(1f, .55f, .35f), 1f);
+            FloorText("南后厨", new Vector3(-2, 0, -22.5f), 180, new Color(1f, .7f, .5f), 1f);
+            FloorText("中段十字", new Vector3(-2, 0, -3.2f), 90, new Color(1f, .4f, .6f), 1.1f);
+            FloorText("北关口", new Vector3(-3, 0, 36.2f), 90, new Color(1f, .7f, .35f), 1.1f);
+            FloorText("南关口", new Vector3(-3, 0, -36.2f), 90, new Color(1f, .7f, .35f), 1.1f);
             // direction signs (face the approaching attacker)
             Sign("北长街 ↑   中庭 →   南工厂 ↓", new Vector3(-55.6f, 6.2f, 0), 90, new Color(.3f, 1f, .9f), .6f);
             Sign("← 主街   A 点 →", new Vector3(-21, 6.4f, 30.4f), 0, new Color(1f, .6f, .2f), .55f);
-            Sign("A 连廊 ↖   B 连廊 ↙   中央市场 →", new Vector3(13.6f, 6.2f, 0), -90, new Color(.3f, 1f, .9f), .55f);
+            Sign("A 连廊 ↖   B 连廊 ↙   中央市场 →", new Vector3(11.7f, 4.25f, 0), -90, new Color(.3f, 1f, .9f), .55f);   // V22：挂到牌楼横幅下沿
+            Sign("↑ 北烤串巷 · 北长街中段", new Vector3(-2, 6.3f, 9.6f), 180, new Color(1f, .55f, .35f), .55f);
+            Sign("↓ 南后厨 · 南工厂中段", new Vector3(-2, 5.2f, -9.75f), 0, new Color(1f, .7f, .5f), .55f);
+            Sign("↓ 北烤串巷 · 回主街", new Vector3(-2, 6.6f, 30.4f), 0, new Color(1f, .55f, .35f), .5f);
+            Sign("↑ 南后厨 · 回主街", new Vector3(-2, 5.2f, -30.25f), 180, new Color(1f, .7f, .5f), .5f);
             Sign("A 点 →", new Vector3(24, 6f, 40), -90, new Color(1f, .5f, .2f), .9f);
             Sign("B 点 →", new Vector3(24, 6f, -40), -90, new Color(.3f, .8f, 1f), .9f);
             Sign("← 主街   B 点 →", new Vector3(-33, 6.2f, -30.4f), 180, new Color(.7f, .4f, 1f), .55f);
@@ -1735,22 +2159,42 @@ namespace NeonSiege
 
         void DefineRoutes()
         {
-            routes["A长街"] = new[] { new Vector3(-64, 0, 14), new Vector3(-64, 0, 40), new Vector3(-30, 0, 40), new Vector3(1, 0, 40), new Vector3(7, 0, 40), new Vector3(22, 0, 41), new Vector3(30, 0, 37), SiteA };
-            routes["A连廊"] = new[] { new Vector3(-52, 0, 4), new Vector3(-20, 0, 4.5f), new Vector3(10, 0, 4), new Vector3(20, 0, 11), new Vector3(20, 0, 17), new Vector3(28, 0, 21), SiteA };
-            routes["中路A"] = new[] { new Vector3(-52, 0, -4), new Vector3(-10, 0, -4.5f), new Vector3(16, 0, -2), new Vector3(27, 0, 12), new Vector3(29, 0, 20), SiteA };
-            routes["B工厂"] = new[] { new Vector3(-64, 0, -14), new Vector3(-64, 0, -40), new Vector3(-30, 0, -40), new Vector3(1, 0, -40), new Vector3(7, 0, -40), new Vector3(22, 0, -40), new Vector3(30, 0, -38), SiteB };
-            routes["A长街墙洞"] = new[] { new Vector3(-64, 0, 14), new Vector3(-64, 0, 40), new Vector3(-30, 0, 40), new Vector3(-4, 0, 46.5f), new Vector3(1, 0, 47), new Vector3(7.5f, 0, 47.5f), new Vector3(22, 0, 44), new Vector3(30, 0, 37), SiteA };
-            routes["B工厂墙洞"] = new[] { new Vector3(-64, 0, -14), new Vector3(-64, 0, -40), new Vector3(-30, 0, -40), new Vector3(-4, 0, -46.5f), new Vector3(1, 0, -47), new Vector3(7.5f, 0, -47.5f), new Vector3(22, 0, -44), new Vector3(30, 0, -38), SiteB };
-            routes["B连廊"] = new[] { new Vector3(-52, 0, -4), new Vector3(-10, 0, -4.5f), new Vector3(10, 0, -4), new Vector3(20, 0, -11), new Vector3(20, 0, -17), new Vector3(28, 0, -21), SiteB };
-            routes["北小巷A"] = new[] { new Vector3(-52, 0, 5), new Vector3(-21, 0, 6.5f), new Vector3(-21, 0, 20), new Vector3(-21, 0, 38), new Vector3(1, 0, 40), new Vector3(7, 0, 40), new Vector3(22, 0, 41), new Vector3(30, 0, 37), SiteA };
-            routes["南小巷B"] = new[] { new Vector3(-52, 0, -5), new Vector3(-33, 0, -6.5f), new Vector3(-33, 0, -18), new Vector3(-33, 0, -24), new Vector3(-33, 0, -38), new Vector3(1, 0, -40), new Vector3(7, 0, -40), new Vector3(22, 0, -40), new Vector3(30, 0, -38), SiteB };
-            routes["中路B"] = new[] { new Vector3(-52, 0, 4), new Vector3(-10, 0, 4.5f), new Vector3(16, 0, 2), new Vector3(27, 0, -12), new Vector3(29, 0, -16), new Vector3(29, 0, -21), SiteB };
+            // V22 第二期：16 条进攻路线（长街 ×2、墙洞 ×2、连接巷 ×2、连廊 ×2、中庭侧口 ×2、北/南小巷 ×2、奶油平台 ×2、假打转点 ×2）。
+            // 路点避开门洞正中（关口前后各一个点，偏开 1 m），连接巷 / 后厨走中线。
+            Vector3 V(float x, float z, float y = 0) { return new Vector3(x, y, z); }
+            Vector3[] N(params Vector3[] p) { return p; }
+            var westN = N(V(-62, 13), V(-58, 22), V(-56, 36), V(-40, 37.5f), V(-29, 32.6f), V(-20, 38.5f));
+            var westS = N(V(-62, -13), V(-58, -22), V(-56, -36), V(-40, -37.5f), V(-29, -32.6f), V(-20, -38.5f));
+            var gateN = N(V(.5f, 41), V(7.5f, 41.5f), V(14, 37.5f), V(21, 37.5f), V(30, 37), SiteA);
+            var gateS = N(V(.5f, -41), V(7.5f, -41.5f), V(24, -39.5f), V(30, -38), SiteB);
+            Vector3[] Cat(params Vector3[][] parts) { var l = new List<Vector3>(); foreach (var p in parts) l.AddRange(p); return l.ToArray(); }
+            routes["A长街"] = Cat(westN, gateN);
+            routes["A长街墙洞"] = Cat(westN, N(V(-4, 46.5f), V(1, 47), V(7.5f, 47.5f), V(14, 46), V(22, 44), V(30, 38), SiteA));
+            routes["北烤串巷A"] = Cat(N(V(-52, 5), V(-30, 4), V(-14, 7.5f), V(-2, 9), V(-2, 20), V(-1.5f, 32)), gateN);
+            routes["A连廊"] = N(V(-52, 4), V(-28, 4), V(-13.5f, 3.5f), V(5, 5.5f), V(19, 11), V(20, 17), V(28, 21), SiteA);
+            routes["中路A"] = N(V(-52, -4), V(-30, -3), V(-10, -3), V(6, -6.5f), V(18, -1.5f), V(26, 8), V(28, 14), V(29, 20), SiteA);
+            routes["北小巷A"] = Cat(N(V(-52, 5), V(-21, 7.5f), V(-21, 20), V(-21, 32.5f), V(-20, 38.5f)), gateN);
+            routes["奶油平台A"] = N(V(-52, 4), V(-28, 4), V(-13.5f, 3.5f), V(8.5f, 2.4f), V(18.5f, 2.4f, CreamTop), V(20.3f, 3.8f, CreamTop), V(25, 9), V(28, 14), V(29, 20), SiteA);
+            routes["南巷转A"] = Cat(N(V(-52, -5), V(-14, -7.5f), V(-2, -12), V(-2, -21), V(-1, -32.5f), V(-2, -21), V(-2, 0), V(-2, 20), V(-1.5f, 32)), gateN);
+            routes["B工厂"] = Cat(westS, gateS);
+            routes["B工厂墙洞"] = Cat(westS, N(V(-4, -46.5f), V(1, -47), V(7.5f, -47.5f), V(16, -47), V(24, -41), V(30, -38), SiteB));
+            routes["南后厨B"] = Cat(N(V(-52, -5), V(-30, -4), V(-14, -7.5f), V(-2, -9), V(-2, -20), V(-1.5f, -32)), gateS);
+            routes["B连廊"] = N(V(-52, -4), V(-28, -4), V(-10, -3), V(6, -6.5f), V(19, -11), V(20, -17), V(28, -21), SiteB);
+            routes["中路B"] = N(V(-52, 4), V(-28, 4), V(-13.5f, 3.5f), V(5, 5.5f), V(18, -1.5f), V(27, -12), V(29, -16), V(29, -21), SiteB);
+            routes["南小巷B"] = Cat(N(V(-52, -5), V(-33, -6.5f), V(-33, -18), V(-33, -24), V(-29, -32.6f), V(-20, -38.5f)), gateS);
+            routes["奶油平台B"] = N(V(-52, 4), V(-28, 4), V(-13.5f, 3.5f), V(8.5f, 2.4f), V(18.5f, 2.4f, CreamTop), V(19.8f, -3.8f, CreamTop), V(25, -9.5f), V(27, -12), V(29, -16), V(29, -21), SiteB);
+            routes["北巷转B"] = Cat(N(V(-52, 5), V(-14, 7.5f), V(-2, 12), V(-2, 21), V(-1, 32.5f), V(-2, 21), V(-2, 0), V(-2, -20), V(-1.5f, -32)), gateS);
             anchors[0] = ToonAssets.Available
-                ? new[] { new Vector3(42.5f, 0, 37.3f), new Vector3(45.3f, 0, 24.5f), new Vector3(33, 0, 30), new Vector3(30, 0, 36), new Vector3(33.5f, 2f, 26f) }   // V17：A 点蛋糕方块顶
-                : new[] { new Vector3(42.5f, 0, 37.3f), new Vector3(45.3f, 0, 24.5f), new Vector3(33, 0, 30), new Vector3(30, 0, 36) };
+                ? new[] { new Vector3(42.5f, 0, 37.3f), new Vector3(45.3f, 0, 24.5f), new Vector3(33, 0, 31), new Vector3(30, 0, 36), new Vector3(33.5f, 2f, 26.5f) }   // V22：A 点汉堡平台顶
+                : new[] { new Vector3(42.5f, 0, 37.3f), new Vector3(45.3f, 0, 24.5f), new Vector3(33, 0, 31), new Vector3(30, 0, 36) };
             anchors[1] = new[] { new Vector3(44.8f, 0, -38.3f), new Vector3(38, 0, -21.3f), new Vector3(33, 0, -30), new Vector3(31, 0, -42) };
-            anchors[2] = new[] { new Vector3(26, 0, 8), new Vector3(26, 0, -8), new Vector3(28, 0, 0) };
+            anchors[2] = new[] { new Vector3(26, 0, 8), new Vector3(26, 0, -8), new Vector3(28, 0, 0), new Vector3(21.5f, CreamTop, -2.5f), new Vector3(18, CreamTop, 1) };   // 中庭 + 奶油平台
+            anchors[3] = new[] { new Vector3(6, 0, 35.5f), new Vector3(14, 0, 37.5f), new Vector3(10, 0, 47) };       // 北关口（守方一侧）
+            anchors[4] = new[] { new Vector3(5.5f, 0, -32.5f), new Vector3(14, 0, -42), new Vector3(17, 0, -47) };    // 南关口
         }
+
+        // 关口蒸笼门（z>0 北 / z<0 南）
+        public Shutter Gate(int side) { foreach (var s in shutters) if (s != null && s.gate && Mathf.Sign(s.transform.position.z) == side) return s; return null; }
 
         public Vector3 SpawnPoint(bool attacker, int slot)
         {
@@ -1781,6 +2225,7 @@ namespace NeonSiege
 
         public void ResetRound()
         {
+            SteamCloud.ClearTimed();   // V22：蒸汽阀的白雾不跨回合
             foreach (var d in destructibles) d.Restore();
             foreach (var door in doors) door.Close();
             foreach (var i in Interactable.All.ToArray()) i.ResetRound();

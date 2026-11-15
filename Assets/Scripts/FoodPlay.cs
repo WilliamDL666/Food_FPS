@@ -64,7 +64,7 @@ namespace NeonSiege
                 case FoodForm.MilkTea: return "移动加速 30%，开火不耗弹药";
                 case FoodForm.Spicy: return "子弹附带灼烧，身边热浪烫伤敌人";
                 case FoodForm.Burger: return "面包盾：正面受到的伤害减少 60%";
-                case FoodForm.IceCream: return "子弹让敌人减速，冰冻 3 次直接冻住";
+                case FoodForm.IceCream: return "子弹让敌人减速，2 秒内连中 3 次冻住 1.2 秒";
                 case FoodForm.Onigiri: return "冲刺时滚成饭团，撞到敌人造成伤害并弹飞";
                 case FoodForm.Dark: return "冒绿烟、自己慢慢掉血，但子弹会让敌人看不清";
                 default: return "";
@@ -134,7 +134,8 @@ namespace NeonSiege
         {
             ingredients.Add(id);
             Sfx.Play("food_popcorn", f.transform.position, .7f, 1.3f, f.human ? 0f : 1f, 18f);
-            if (f.human) Match.I.Feed("拿到 " + Ingredients.Name(id) + (ingredients.Count == 1 ? " · 再拿一样凑成一道菜" : ""), Ingredients.Col(id));
+            if (f.human) Match.I.Feed("拿到 " + Ingredients.Name(id) + (ingredients.Count == 1 && Match.Mode != GameMode.Cook ? " · " + FoodGuide.HudHint(ingredients) : ""), Ingredients.Col(id));
+            if (f.human) FoodTips.Trigger("ingredient");
             if (Match.Mode == GameMode.Cook) return;   // 抢食大作战：食材是用来交的，不变身
             if (ingredients.Count == 2)
             {
@@ -148,7 +149,7 @@ namespace NeonSiege
         {
             EndForm(false);
             form = fm; formUntil = Time.time + Ingredients.FormTime(fm); transforms++; if (fm == FoodForm.Dark) darkDishes++;
-            if (f.human) Collection.AddTransform(fm);
+            if (f.human) { Collection.AddTransform(fm); FoodTips.Trigger("dish_" + fm); }
             if (fm == FoodForm.Cake) f.armor = Config.MaxArmor + 100;
             iceHits = 0; rammed.Clear();
             var col = Ingredients.FormColor(fm);
@@ -260,16 +261,16 @@ namespace NeonSiege
             if (!f.alive || Match.I.phase != Phase.Live) return;
             ult = Mathf.Min(1f, ult + Time.deltaTime * .004f);
             // 灼烧
-            if (Time.time < burnUntil && Time.time >= burnTick) { burnTick = Time.time + .5f; f.ReceiveDamage(4f, burnFrom, f.transform.position, false); Fx.Burst(f.Chest, Vector3.up, new Color(1f, .4f, .1f), 5, 1.5f, .07f, .4f, -.3f); }
+            if (Time.time < burnUntil && Time.time >= burnTick) { burnTick = Time.time + .5f; DamageCtx.Set(DamageKind.Fire, "辣椒灼烧"); f.ReceiveDamage(4f, burnFrom, f.transform.position, false); Fx.Burst(f.Chest, Vector3.up, new Color(1f, .4f, .1f), 5, 1.5f, .07f, .4f, -.3f); }
             // 热巧克力地面
-            if (Time.time >= burnTick && SauceZone.HotAt(f.transform.position) && f.grounded) { burnTick = Time.time + .5f; f.ReceiveDamage(3f, null, f.transform.position, false); }
+            if (Time.time >= burnTick && SauceZone.HotAt(f.transform.position) && f.grounded) { burnTick = Time.time + .5f; DamageCtx.Set(DamageKind.Env, "热巧克力地面"); f.ReceiveDamage(3f, null, f.transform.position, false); }
             if (!Transformed) return;
             if (form == FoodForm.Spicy && Time.time >= auraTick)
             {
                 auraTick = Time.time + .5f;
-                foreach (var e in Match.I.fighters) if (e != f && e.alive && e.team != f.team && Vector3.Distance(e.transform.position, f.transform.position) < 3.2f) e.ReceiveDamage(3f, f, f.transform.position, false);
+                foreach (var e in Match.I.fighters) if (e != f && e.alive && e.team != f.team && Vector3.Distance(e.transform.position, f.transform.position) < 3.2f) { DamageCtx.Set(DamageKind.Food, "辣椒光环"); e.ReceiveDamage(3f, f, f.transform.position, false); }
             }
-            if (form == FoodForm.Dark && Time.time >= darkTick) { darkTick = Time.time + 1f; f.ReceiveDamage(3f, null, f.transform.position, false); }
+            if (form == FoodForm.Dark && Time.time >= darkTick) { darkTick = Time.time + 1f; DamageCtx.Set(DamageKind.Env, "黑暗料理"); f.ReceiveDamage(3f, null, f.transform.position, false); }
             bool ramming = Time.time < ramUntil || form == FoodForm.Cake && f.sprinting || form == FoodForm.Onigiri && f.sprinting;
             if (ramming)
                 foreach (var e in Match.I.fighters)
@@ -279,6 +280,7 @@ namespace NeonSiege
                     rammed.Add(e); StartCoroutine(Unram(e));
                     Vector3 away = e.transform.position - f.transform.position; away.y = 0;
                     e.Launch(away.normalized * 9f + Vector3.up * 6f);
+                    if (Time.time < ramUntil) DamageCtx.Set(DamageKind.Ult, UltName(f.role)); else DamageCtx.Set(DamageKind.Food, Ingredients.FormName(form) + "冲撞");
                     e.ReceiveDamage(Time.time < ramUntil ? 45f : 25f, f, f.transform.position, false);
                     Sfx.Play("food_boing", e.Chest, 1f, .8f, 1f, 30f); Fx.Burst(e.Chest, Vector3.up, Ingredients.FormColor(form), 18, 4f, .08f, .6f, .6f);
                 }
@@ -325,6 +327,7 @@ namespace NeonSiege
                     for (int i = 0; i < 6; i++) Fx.Burst(ground + Vector3.up * 1.5f, Vector3.up, FoodFx.Confetti[i], 40, 8f, .1f, 2f, .2f);
                     break;
             }
+            UltWarn.OnUlt(f, ground);   // V22 第三期：敌方大招预警（横幅 + 全图专属音 + 状态条 + 蜡烛落点圈），生效时间不变
             return true;
         }
     }
@@ -334,6 +337,15 @@ namespace NeonSiege
     {
         public static readonly List<IngredientPickup> Live = new List<IngredientPickup>();
         public string id; public IngredientSpot spot; float born, life;
+        // V21 规则甲：手上已有一样、这一样又凑不成菜时，不自动捡，要按住 G（FoodGuide.HoldToPick 秒）
+        public Fighter holder; public float holdT;
+        public float HoldProgress(Fighter f) { return holder == f ? Mathf.Clamp01(holdT / FoodGuide.HoldToPick) : 0f; }
+        public static IngredientPickup HoldTarget(Fighter f)
+        {
+            if (f == null || !f.alive || !f.Food.CanCarry) return null;
+            foreach (var p in Live) if (p != null && Vector3.Distance(f.transform.position, p.transform.position) <= 1.3f && FoodGuide.NeedsHold(f, p.id)) return p;
+            return null;
+        }
         public static IngredientPickup Spawn(string id, Vector3 at, IngredientSpot spot, float life = 0)
         {
             var go = new GameObject("食材 " + Ingredients.Name(id)); go.transform.position = Skills.GroundAt(at) + Vector3.up * .05f;
@@ -352,7 +364,15 @@ namespace NeonSiege
             if (Match.I == null || Time.time - born < .5f) return;
             foreach (var f in Match.I.fighters)
             {
-                if (!f.alive || !f.Food.CanCarry || Vector3.Distance(f.transform.position, transform.position) > 1.3f) continue;
+                if (!f.alive || !f.Food.CanCarry || Vector3.Distance(f.transform.position, transform.position) > 1.3f) { if (holder == f) { holder = null; holdT = 0; } continue; }
+                if (FoodGuide.NeedsHold(f, id))
+                {
+                    if (f.human) FoodTips.Trigger("force_pick");
+                    if (!f.UseHeld) { if (holder == f) { holder = null; holdT = 0; } continue; }
+                    if (holder != f) { holder = f; holdT = 0; }
+                    holdT += Time.deltaTime;
+                    if (holdT < FoodGuide.HoldToPick) continue;
+                }
                 f.Food.Pick(id);
                 if (spot != null) spot.Taken();
                 Destroy(gameObject); return;
@@ -407,6 +427,8 @@ namespace NeonSiege
             }
         }
         float Cooldown(Fighter f) { return cooldown.TryGetValue(f, out float t) ? t - Time.time : 0; }
+        public float CooldownLeft(Fighter f) { return Mathf.Max(0, Cooldown(f)); }   // V21：气泡显示"还要 N 秒"
+        public void SetCooldownForTest(Fighter f, float secs) { cooldown[f] = Time.time + secs; }
         public override bool Usable(Fighter f)
         {
             if (!f.alive || Cooldown(f) > 0) return false;
@@ -480,6 +502,7 @@ namespace NeonSiege
         public static readonly List<DeliveryCrate> Live = new List<DeliveryCrate>();
         Vector3 target; bool landed; float landedAt; Transform drone;
         public bool Landed { get { return landed; } }
+        public Vector3 Target { get { return target; } }   // V21：下落时地上显示落点
         public static DeliveryCrate Drop(Vector3 at)
         {
             var go = new GameObject("外卖箱"); var c = go.AddComponent<DeliveryCrate>(); c.target = Skills.GroundAt(at);
@@ -494,7 +517,7 @@ namespace NeonSiege
             }
             var l = new GameObject("信号灯").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up; l.color = new Color(1f, .6f, .8f); l.range = 6; l.intensity = 3;
             Live.Add(c);
-            Match.I.Feed("外卖到了！无人机正在空投一个外卖箱", new Color(1f, .7f, .85f));
+            Match.I.Feed("外卖到了！无人机正在空投一个外卖箱 · 抢到：随机变身 + 补满弹药 + 酥脆", new Color(1f, .7f, .85f));
             Sfx.Ui("maximize", .5f, 1.4f);
             return c;
         }
@@ -605,7 +628,7 @@ namespace NeonSiege
                     Fx.Burst(h.point, Vector3.up, new Color(.9f, .2f, .1f), 20, 5f, .08f, .6f, 1.2f);
                     Sfx.Play("food_splat", h.point, .9f, .7f, 1f, 30f);
                     foreach (var e in Match.I.fighters)
-                        if (e.alive && e.team != attacker.team && Vector3.Distance(e.transform.position, c) < 3.4f) e.ReceiveDamage(8f, attacker, c, false);
+                        if (e.alive && e.team != attacker.team && Vector3.Distance(e.transform.position, c) < 3.4f) { DamageCtx.Set(DamageKind.Env, "火锅飞溅"); e.ReceiveDamage(8f, attacker, c, false); }
                 }
             }
             int zone = SauceZone.At(h.point + Vector3.up * .05f);
@@ -662,6 +685,7 @@ namespace NeonSiege
     public class CandleBarrage : MonoBehaviour
     {
         Fighter owner; Vector3 center; int dropped; float next;
+        public int Dropped { get { return dropped; } }   // V22 第三期：测试读"生效时间不变"
         public static void Spawn(Vector3 at, Fighter owner) { var go = new GameObject("蜡烛轰炸"); var c = go.AddComponent<CandleBarrage>(); c.owner = owner; c.center = at; c.next = Time.time + .3f; }
         void Update()
         {
@@ -677,7 +701,7 @@ namespace NeonSiege
                 {
                     if (!f.alive || owner != null && f.team == owner.team && f != owner) continue;
                     float d = Vector3.Distance(f.Chest, p); if (d > 3.5f) continue;
-                    f.ReceiveDamage(45f * (1f - d / 3.5f) * (f == owner ? .5f : 1f), owner, p, false, true);
+                    DamageCtx.Set(DamageKind.Ult, FoodState.UltName(Role.Ember)); f.ReceiveDamage(45f * (1f - d / 3.5f) * (f == owner ? .5f : 1f), owner, p, false, true);
                 }
             if (dropped >= 6) Destroy(gameObject);
         }
@@ -750,7 +774,7 @@ namespace NeonSiege
             center = new GUIStyle(label) { alignment = TextAnchor.MiddleCenter };
             white = Texture2D.whiteTexture;
         }
-        static void Fill(Rect r, Color c) { var o = GUI.color; GUI.color = c; GUI.DrawTexture(r, white); GUI.color = o; }
+        static void Fill(Rect r, Color c) { var o = GUI.color; GUI.color = new Color(c.r, c.g, c.b, c.a * o.a); GUI.DrawTexture(r, white); GUI.color = o; }   // V22：跟随外层透明度（准镜淡入）
         static void Txt(Rect r, string t, GUIStyle s, Color c) { var o = s.normal.textColor; var sh = new Rect(r.x + 1, r.y + 1, r.width, r.height); s.normal.textColor = new Color(0, 0, 0, .6f); GUI.Label(sh, t, s); s.normal.textColor = c; GUI.Label(r, t, s); s.normal.textColor = o; }
 
         // ---- 美食准镜（程序生成贴图）
@@ -778,10 +802,11 @@ namespace NeonSiege
             t = new Texture2D(N, N, TextureFormat.RGBA32, true) { wrapMode = TextureWrapMode.Clamp }; t.SetPixels(px); t.Apply(); reticles[id] = t; return t;
         }
 
-        public static void DrawReticle(float W, float H, Fighter p)
+        public static void DrawReticle(float W, float H, Fighter p, float alpha = 1f)
         {
             Styles();
             var th = FoodFx.For(p.W); float cx = W / 2, cy = H / 2;
+            var oc0 = GUI.color; GUI.color = new Color(1, 1, 1, alpha);
             if (p.W.sight == "scope")
             {
                 // 冰糖葫芦 / 奶油裱花：整片柠檬切片做成全屏狙击镜
@@ -792,11 +817,12 @@ namespace NeonSiege
                 GUI.DrawTexture(new Rect(cx - R, cy - R, 2 * R, 2 * R), lemon);
                 Fill(new Rect(cx - R * .8f, cy - 1, R * 1.6f, 2), new Color(.2f, .1f, 0, .9f)); Fill(new Rect(cx - 1, cy - R * .8f, 2, R * 1.6f), new Color(.2f, .1f, 0, .9f));
                 Fill(new Rect(cx - 3, cy - 3, 6, 6), new Color(1f, .2f, .2f));
+                GUI.color = oc0;
                 return;
             }
             float size = 150;
-            var o = GUI.color; GUI.color = new Color(0, 0, 0, .45f); GUI.DrawTexture(new Rect(cx - size / 2 + 2, cy - size / 2 + 2, size, size), Reticle(p.W.id));
-            GUI.color = new Color(th.splat.r * .6f + .4f, th.splat.g * .6f + .4f, th.splat.b * .6f + .4f, .95f); GUI.DrawTexture(new Rect(cx - size / 2, cy - size / 2, size, size), Reticle(p.W.id)); GUI.color = o;
+            GUI.color = new Color(0, 0, 0, .45f * alpha); GUI.DrawTexture(new Rect(cx - size / 2 + 2, cy - size / 2 + 2, size, size), Reticle(p.W.id));
+            GUI.color = new Color(th.splat.r * .6f + .4f, th.splat.g * .6f + .4f, th.splat.b * .6f + .4f, .95f * alpha); GUI.DrawTexture(new Rect(cx - size / 2, cy - size / 2, size, size), Reticle(p.W.id)); GUI.color = oc0;
         }
         static Texture2D LemonTexture()
         {
@@ -873,12 +899,14 @@ namespace NeonSiege
                 else Txt(slot, "空", new GUIStyle(center) { fontSize = 13 }, new Color(.6f, .6f, .7f));
             }
             if (Match.Mode != GameMode.Cook && fs.ingredients.Count == 1)
-                Txt(new Rect(x + 222, y, 360, 34), "再拿一样凑成一道菜就会变身", small, new Color(1f, .85f, .7f));
+                Txt(new Rect(x + 222, y, 460, 34), FoodGuide.HudHint(fs.ingredients), new GUIStyle(small) { fontSize = 15 }, new Color(.6f, 1f, .65f));   // V21：差一样：鸡蛋 → 巨型蛋糕
             if (Match.Mode == GameMode.Cook && fs.ingredients.Count > 0) Txt(new Rect(x + 222, y, 360, 34), "把食材送回自己队的大锅", small, new Color(1f, .85f, .7f));
             // 大招
             Rect ub = new Rect(x, y + 40, 208, 14); Fill(ub, new Color(.08f, .05f, .1f, .8f));
             Fill(new Rect(ub.x, ub.y, ub.width * fs.ult, ub.height), fs.UltReady ? new Color(1f, .85f, .3f) : new Color(1f, .6f, .8f, .8f));
-            Txt(new Rect(x + 214, y + 34, 380, 24), (fs.UltReady ? "X 大招就绪 · " : "大招 " + Mathf.FloorToInt(fs.ult * 100) + "% · ") + FoodState.UltName(p.role), small, fs.UltReady ? new Color(1f, .85f, .3f) : new Color(.9f, .8f, .9f));
+            bool flash = fs.UltReady && Mathf.Repeat(Time.time * 2f, 1f) < .5f;   // 就绪时整条闪
+            if (flash) Fill(new Rect(ub.x - 2, ub.y - 2, ub.width + 4, ub.height + 4), new Color(1f, .9f, .4f, .5f));
+            Txt(new Rect(x + 214, y + 34, 640, 24), (fs.UltReady ? "X 大招就绪 · " : "大招 " + Mathf.FloorToInt(fs.ult * 100) + "% · ") + FoodState.UltName(p.role) + "：" + FoodGuide.UltEffect(p.role), small, fs.UltReady ? new Color(1f, .85f, .3f) : new Color(.9f, .8f, .9f));
             if (fs.Transformed)
             {
                 Rect fb = new Rect(W / 2 - 220, 98, 440, 50); var fc = Ingredients.FormColor(fs.form);
@@ -889,7 +917,8 @@ namespace NeonSiege
             if (fs.crispy) Txt(new Rect(W - 436, H - 186, 420, 24), "金黄酥脆版 · 伤害 +15%", new GUIStyle(small) { alignment = TextAnchor.MiddleRight }, new Color(1f, .75f, .25f));
             if (Match.Mode == GameMode.Grow) Txt(new Rect(x, y - 30, 400, 26), "体型 " + fs.growLevel + " 级（吃零食 +1，击杀 +2，阵亡减半）", label, new Color(1f, .85f, .4f));
             var myClip = fs.EmoteClip; if (myClip != null) Txt(new Rect(W / 2 - 100, H / 2 + 140, 200, 26), "你：" + FoodState.EmoteLabel(myClip), new GUIStyle(center) { fontSize = 16 }, Color.white);
-            if (p.alive && p.FoodAim) DrawReticle(W, H, p);
+            float rk = GameUI.FoodReticleK(p);   // V22：美食准镜和腰射准星交叉淡入（adsK 0.6 → 0.85），开镜过程中屏幕中心始终有准星
+            if (p.alive && rk > .01f && (m.ui == null || !m.ui.HudOverlayOpen)) DrawReticle(W, H, p, rk);
         }
 
         void CollectionPanel(float W, float H)
@@ -918,8 +947,9 @@ namespace NeonSiege
                 Rect r = new Rect(x0 + 620, y0 + 40 + i * 62, 520, 56);
                 Fill(r, d ? new Color(.3f, .12f, .25f, .9f) : new Color(.18f, .18f, .2f, .9f));
                 Fill(new Rect(r.x, r.y, 6, r.height), d ? Ingredients.FormColor(fm) : new Color(.4f, .4f, .45f));
-                Txt(new Rect(r.x + 14, r.y + 2, 500, 28), (d ? Ingredients.FormName(fm) : "？？？") + "  ·  " + Ingredients.FormRecipe(fm), label, d ? Ingredients.FormColor(fm) : new Color(.7f, .7f, .75f));
-                Txt(new Rect(r.x + 14, r.y + 28, 500, 22), d ? Ingredients.FormEffect(fm) : "还没做出来过", small, new Color(.85f, .85f, .9f));
+                // V21：配方是规则，名字和效果全部公开；"没做过"只影响点亮和帽子解锁
+                Txt(new Rect(r.x + 14, r.y + 2, 500, 28), Ingredients.FormName(fm) + "  ·  " + Ingredients.FormRecipe(fm) + (d ? "  · 已做过" : "  · 还没做过"), label, d ? Ingredients.FormColor(fm) : new Color(.7f, .7f, .75f));
+                Txt(new Rect(r.x + 14, r.y + 28, 500, 22), Ingredients.FormEffect(fm), small, new Color(.85f, .85f, .9f));
             }
             Rect close = new Rect(W / 2 - 120, H - 90, 240, 50);
             Fill(close, new Color(.6f, .25f, .45f, .95f)); Txt(close, "返回", new GUIStyle(center) { fontSize = 20 }, Color.white);

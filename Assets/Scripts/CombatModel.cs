@@ -26,6 +26,8 @@ namespace NeonSiege
         public static bool AdsHold = false, CrouchHold = true;
         // 镜头
         public static float BobScale = 1f, ShakeScale = 1f, SprintFovAdd = 6f, SlideFovAdd = 10f;
+        // V22 HUD 表现（只影响显示，不改规则）：体力条回满后淡出时长、耗尽锁定脉冲频率、恢复过线闪光时长
+        public static float HudStaminaFade = 1f, HudExhaustPulseHz = 2.5f, HudRecoverFlash = .35f;
     }
 
     // ---------------------------------------------------------------- 部位判定、护甲 / 穿透、弹道
@@ -104,8 +106,24 @@ namespace NeonSiege
         public static float AdsTime(Fighter f) { return f.W.adsTime * (1f + Mathf.Max(0, Weight(f) - Tune.WeightFree) * Tune.WeightAdsPerKg); }
     }
 
-    // 受击记录（死亡回顾、靶场）
-    public struct HitRecord { public string attacker, weapon; public HitPart part; public float hp, armor, distance, time; public int pen, cls; }
+    // 受击记录（死亡回顾、靶场）。V22：所有伤害来源都写记录（kind / source / gun），不只是子弹
+    public enum DamageKind { Gun, Melee, Skill, Grenade, Fire, Ult, Food, Env, Bomb }
+    public struct HitRecord
+    {
+        public string attacker, weapon; public HitPart part; public float hp, armor, distance, time; public int pen, cls;
+        public DamageKind kind; public Fighter source; public WeaponSpec gun; public bool hasPart;
+    }
+    // V22：非子弹伤害的来源说明。调用 ReceiveDamage 之前 Set 一次，ReceiveDamage 第一行取走（不会串到下一次）
+    public static class DamageCtx
+    {
+        static bool set; static DamageKind kind; static string name;
+        public static void Set(DamageKind k, string n) { set = true; kind = k; name = n; }
+        public static bool Take(out DamageKind k, out string n) { k = kind; n = name; bool s = set; set = false; return s; }
+        public static string KindName(DamageKind k)
+        {
+            switch (k) { case DamageKind.Gun: return "枪械"; case DamageKind.Melee: return "近战"; case DamageKind.Skill: return "技能"; case DamageKind.Grenade: return "手雷"; case DamageKind.Fire: return "燃烧"; case DamageKind.Ult: return "大招"; case DamageKind.Food: return "变身"; case DamageKind.Bomb: return "爆炸"; default: return "环境"; }
+        }
+    }
 
     // ---------------------------------------------------------------- 默认数值 + CSV 数据表（StreamingAssets/Data，打包后也能直接改表）
     public static class DataTables
@@ -359,6 +377,9 @@ namespace NeonSiege
                 GameSettings.Fov = Row("视野 FOV", GameSettings.Fov, 60f, 110f, "0"); GameSettings.AdsSensitivity = Row("开镜灵敏度倍率", GameSettings.AdsSensitivity, .3f, 1.5f);
                 Tune.BobScale = Row("视角晃动幅度", Tune.BobScale, 0f, 2f); Tune.ShakeScale = Row("镜头震动幅度", Tune.ShakeScale, 0f, 2f);
                 Tune.SprintFovAdd = Row("冲刺视野增加", Tune.SprintFovAdd, 0f, 15f, "0.0");
+                GUILayout.Label("HUD 表现（V22，只影响显示）", head);
+                Tune.HudStaminaFade = Row("体力条回满后淡出 秒", Tune.HudStaminaFade, .3f, 3f); Tune.HudExhaustPulseHz = Row("耗尽锁定脉冲 Hz", Tune.HudExhaustPulseHz, .5f, 6f, "0.0");
+                Tune.HudRecoverFlash = Row("恢复过线闪光 秒", Tune.HudRecoverFlash, .1f, 1f);
             }
             else if (tab == 1 && p != null)
             {
@@ -382,7 +403,7 @@ namespace NeonSiege
                 p.armorClass = RowI("护甲等级（护胸腹）", p.armorClass, 0, 6); p.helmetClass = RowI("头盔等级（护头）", p.helmetClass, 0, 6);
                 p.Hero.armorClass = p.armorClass; p.Hero.helmetClass = p.helmetClass;
                 GUILayout.Label("负重 " + Ballistics.Weight(p).ToString("0.0") + " kg · 移速 ×" + Ballistics.WeightSpeedMul(p).ToString("0.00") + " · 开镜 " + Ballistics.AdsTime(p).ToString("0.00") + " 秒", lab);
-                GUILayout.Label("技能：" + p.Hero.skill.name + " · " + p.Hero.skill.numbers, small);
+                GUILayout.Label("技能：" + p.Hero.skill.Name + " · " + p.Hero.skill.Numbers, small);
                 p.Hero.skill.cooldown = Row("技能冷却 秒", p.Hero.skill.cooldown, 3f, 60f, "0");
                 GUILayout.Label("当前状态：" + p.MoveStateName + " · 体力 " + p.stamina.ToString("0"), lab);
             }
@@ -397,48 +418,283 @@ namespace NeonSiege
         }
     }
 
-    // ---------------------------------------------------------------- 战斗 HUD：体力、姿态、死亡回顾
+    // ---------------------------------------------------------------- 战斗 HUD：准星下方状态带（体力 / 姿态）+ 死亡回顾
+    // V22 第一期：动态状态贴准星，静态信息放边角；默认隐藏，跨过阈值才出现。显示判断都是静态函数，PlaytestRunner 直接调用（M30 / M33）。
+    public enum StaminaLook { Hidden, Draining, Low, Delay, Regen, Locked, FullFade }
     public class CombatHud : MonoBehaviour
     {
-        static GUIStyle lab, head; float diedAt = -1; bool wasAlive = true;
+        static GUIStyle lab, head, small; float diedAt = -1; bool wasAlive = true;
+        static string lastPosture; static float postureAt = -10;
+        public const float BandY = 62f, ArcR = 170f, ArcSpan = 26f;   // 弧顶在准星下 62 px，半径 170，±26° → 弦长约 150 px
+
+        // ---- 显示判断（测试直接调用）
+        public static float StaminaAlpha(Fighter p)
+        {
+            if (p == null || !p.alive) return 0f;
+            if (p.stamina < Tune.StaminaMax - .5f) return 1f;
+            return Mathf.Clamp01(1f - (Time.time - p.staminaFullAt) / Mathf.Max(.05f, Tune.HudStaminaFade));
+        }
+        public static StaminaLook StaminaState(Fighter p)
+        {
+            if (StaminaAlpha(p) <= .01f) return StaminaLook.Hidden;
+            if (p.exhausted) return StaminaLook.Locked;
+            if (p.stamina >= Tune.StaminaMax - .5f) return StaminaLook.FullFade;
+            if (p.sprinting && !p.Sliding) return p.stamina < Tune.ExhaustRecover ? StaminaLook.Low : StaminaLook.Draining;
+            return Time.time - p.StaminaUsedAt <= Tune.RegenDelay ? StaminaLook.Delay : StaminaLook.Regen;
+        }
+        public static string Posture(Fighter p) { return p == null || !p.alive ? null : p.Sliding ? "slide" : p.Prone ? "prone" : p.crouching ? "crouch" : null; }
+        public static string PostureName(string k) { return k == "slide" ? "滑铲" : k == "prone" ? "趴下" : k == "crouch" ? "蹲下" : ""; }
+        // 状态带上要画的元素（站立 + 满体力 + 不在切换时为空）
+        public static List<string> Elements(Fighter p)
+        {
+            var list = new List<string>();
+            if (p == null || !p.alive) return list;
+            if (StaminaAlpha(p) > .01f) list.Add("stamina");
+            if (p.exhausted) list.Add("lock");
+            if (Time.time - p.staminaRecoveredAt < Tune.HudRecoverFlash) list.Add("flash");
+            var po = Posture(p); if (po != null) list.Add("posture:" + po);
+            if (p.ProneChangeK < 1f) list.Add("proneRing");
+            return list;
+        }
+        public static Color StaminaColor(StaminaLook s)
+        {
+            switch (s)
+            {
+                case StaminaLook.Locked: return new Color(1f, .36f, .36f);
+                case StaminaLook.Low: return new Color(1f, .84f, .3f);
+                case StaminaLook.Delay: return new Color(.78f, .78f, .84f);
+                case StaminaLook.Regen: return new Color(.55f, 1f, .74f);
+                case StaminaLook.FullFade: return new Color(.6f, 1f, .78f);
+                default: return new Color(1f, .97f, .93f);
+            }
+        }
+
+        // ---- 死亡回顾文字（测试直接调用）
+        public static bool LastHit(Fighter p, out HitRecord h) { h = default; if (p == null || p.damageLog.Count == 0) return false; h = p.damageLog[p.damageLog.Count - 1]; return true; }
+        public static string RecapTitle(Fighter p)
+        {
+            if (!LastHit(p, out var h)) return "阵亡";
+            var k = p.recapKiller;
+            string dist = h.distance > .5f ? "（" + h.distance.ToString("0") + " 米）" : "";
+            if (k == null) return "被 " + h.weapon + " 击倒";
+            if (k == p) return "被自己的 " + h.weapon + " 击倒";
+            return "被 " + k.Hero.name + " 用 " + h.weapon + " 击倒" + dist;
+        }
+        public static string RecapKillerLine(Fighter p)
+        {
+            var k = p != null ? p.recapKiller : null;
+            if (k == null || k == p) return "";
+            string left = p.recapKillerHp > 0 ? "对手剩余 " + Mathf.CeilToInt(p.recapKillerHp) + " 生命 · " + Mathf.CeilToInt(p.recapKillerArmor) + " 护甲" : "对手也倒下了";
+            return left + "　·　你对他造成 " + Mathf.RoundToInt(p.recapDealt) + " 伤害";
+        }
+        public static string RowLabel(HitRecord h) { return h.hasPart ? Ballistics.PartName(h.part) : DamageCtx.KindName(h.kind); }
+
+        // ---- 绘制
         void OnGUI()
         {
             var m = Match.I; if (m == null || m.player == null || TuningPanel.Open) return;
             if (m.ui != null && !m.ui.Started && !m.autoplay && !m.testMode) return;
-            if (lab == null) { var font = Resources.Load<Font>("NotoSansSC"); lab = new GUIStyle(GUI.skin.label) { font = font, fontSize = 14, normal = { textColor = Color.white } }; head = new GUIStyle(lab) { fontSize = 17, fontStyle = FontStyle.Bold }; }
+            if (lab == null)
+            {
+                var font = Resources.Load<Font>("NotoSansSC");
+                lab = new GUIStyle(GUI.skin.label) { font = font, fontSize = 14, normal = { textColor = Color.white } };
+                head = new GUIStyle(lab) { fontSize = 19, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                small = new GUIStyle(lab) { fontSize = 12 };
+            }
+            GUI.depth = -3;   // 画在 GameUI（0）之上：世界标记 / 名牌不压住死亡回顾和状态带
             float s = Mathf.Clamp(Screen.height / 1080f, .7f, 1.6f); GUI.matrix = Matrix4x4.Scale(new Vector3(s, s, 1));
             float W = Screen.width / s, H = Screen.height / s; var p = m.player;
             if (p.alive && !wasAlive) diedAt = -1;
             if (!p.alive && wasAlive) diedAt = Time.time;
             wasAlive = p.alive;
-            if (p.alive)
-            {
-                // 体力条（不满时显示）+ 姿态
-                if (p.stamina < Tune.StaminaMax - .5f)
-                {
-                    Rect r = new Rect(W / 2 - 110, H - 128, 220, 7);
-                    Fill(r, new Color(0, 0, 0, .5f)); Fill(new Rect(r.x, r.y, r.width * p.stamina / Tune.StaminaMax, r.height), p.exhausted ? new Color(1f, .35f, .3f) : new Color(.6f, 1f, .7f));
-                    if (p.exhausted) Label(new Rect(W / 2 - 110, H - 150, 220, 20), "体力耗尽 · 暂时不能冲刺", new Color(1f, .5f, .45f));
-                }
-                Label(new Rect(16, H - 262, 400, 22), "姿态：" + p.MoveStateName + "   负重 " + Ballistics.Weight(p).ToString("0.0") + " kg", new Color(.85f, .9f, 1f));
-                return;
-            }
-            // 死亡回顾：被谁、用什么、多远、每一发打在哪
+            if (p.alive) { if (m.ui == null || !m.ui.HudOverlayOpen) Band(W, H, p); return; }
             if (diedAt < 0 || Time.time - diedAt > 7f || p.damageLog.Count == 0) return;
-            var last = p.damageLog[p.damageLog.Count - 1];
-            float pw = 560, ph = 52 + Mathf.Min(6, p.damageLog.Count) * 24, x = W / 2 - pw / 2, y = H * .58f;
-            Fill(new Rect(x, y, pw, ph), new Color(.08f, .03f, .06f, .88f));
-            Label(new Rect(x + 14, y + 8, pw, 26), "死亡回顾 · 被 " + last.attacker + " 用 " + last.weapon + " 击倒（" + last.distance.ToString("0") + " 米）", new Color(1f, .7f, .6f), head);
-            int start = Mathf.Max(0, p.damageLog.Count - 6);
+            Recap(W, H, p);
+        }
+
+        // 准星下方状态带：细弧形体力条（25% 解锁刻度）+ 白色豆子姿态剪影
+        void Band(float W, float H, Fighter p)
+        {
+            float cx = W / 2, cy = H / 2;
+            Vector2 c = new Vector2(cx, cy + BandY + ArcR);
+            float a = StaminaAlpha(p); var st = StaminaState(p);
+            if (a > .01f)
+            {
+                float frac = Mathf.Clamp01(p.stamina / Tune.StaminaMax), tick = Mathf.Clamp01(Tune.ExhaustRecover / Tune.StaminaMax);
+                float a0 = -ArcSpan, a1 = ArcSpan, af = Mathf.Lerp(a0, a1, frac), at = Mathf.Lerp(a0, a1, tick);
+                Color col = StaminaColor(st);
+                float pulse = st == StaminaLook.Locked ? .5f + .5f * Mathf.Sin(Time.time * Tune.HudExhaustPulseHz * Mathf.PI * 2f) : 0f;
+                // V22 打磨：弧加粗约 2 倍（填充 10 px），外圈深色描边 + 深色半透明底槽，亮地面上也清楚（对照 UI-1 / UI-2）
+                if (st == StaminaLook.Locked) Arc(c, ArcR, a0 - 1.5f, a1 + 1.5f, 22 + 6 * pulse, new Color(1f, .25f, .25f, (.12f + .2f * pulse) * a));   // 红色呼吸光
+                Arc(c, ArcR, a0 - .9f, a1 + .9f, 16, new Color(.16f, .06f, .14f, .7f * a));   // 描边
+                Arc(c, ArcR, a0 - .3f, a1 + .3f, 12, st == StaminaLook.Locked ? new Color(.45f, .08f, .1f, (.75f + .15f * pulse) * a) : new Color(.1f, .05f, .1f, .45f * a));   // 深色底槽（锁定时变暗红）
+                if (frac > .005f) Arc(c, ArcR, a0, af, 10, new Color(col.r, col.g, col.b, a));
+                if (frac > .005f) Arc(c, ArcR - 3f, a0, af, 2, new Color(1, 1, 1, .35f * a));   // 顶部高光
+                bool hot = st == StaminaLook.Locked || st == StaminaLook.Low;
+                Tick(c, ArcR, at, 22, 5, new Color(.16f, .06f, .14f, .8f * a));
+                Tick(c, ArcR, at, hot ? 20 : 18, hot ? 3f : 2.5f, hot ? new Color(1f, .95f, .9f, a) : new Color(1, 1, 1, .85f * a));
+                if (st == StaminaLook.Locked)
+                {
+                    Vector2 lp = ArcPoint(c, ArcR, a0 - 9f);
+                    Icons.Draw(new Rect(lp.x - 12 + 1.5f, lp.y - 13 + 1.5f, 24, 24), Icons.Lock, new Color(0, 0, 0, .55f * a));
+                    Icons.Draw(new Rect(lp.x - 12, lp.y - 13, 24, 24), Icons.Lock, new Color(1f, .4f + .2f * pulse, .4f + .2f * pulse, a));
+                }
+                float fk = (Time.time - p.staminaRecoveredAt) / Mathf.Max(.05f, Tune.HudRecoverFlash);
+                if (fk >= 0 && fk < 1)   // 恢复过线：闪一下 + 刻度旁小星星
+                {
+                    Arc(c, ArcR, a0, af, 10 + 12 * (1 - fk), new Color(1f, 1f, .85f, .7f * (1 - fk)));
+                    Vector2 sp = ArcPoint(c, ArcR - 20, at + 4);
+                    float sz = 10 + 10 * fk; Icons.Draw(new Rect(sp.x - sz / 2, sp.y - sz / 2, sz, sz), Icons.Diamond, new Color(1f, .95f, .5f, 1 - fk));
+                }
+            }
+            string po = Posture(p);
+            if (po != lastPosture) { lastPosture = po; postureAt = Time.time; }
+            if (po != null)
+            {
+                float pop = Mathf.Lerp(1.3f, 1f, Mathf.Clamp01((Time.time - postureAt) / .15f));
+                float sz = 40 * pop; Rect r = new Rect(cx - sz / 2, cy + BandY + 42 - sz / 2, sz, sz);
+                GUI.DrawTexture(new Rect(cx - 25, cy + BandY + 17, 50, 50), Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, new Color(.12f, .06f, .12f, .3f), 0, 25);   // 柔和深色底
+                var tex = po == "slide" ? Icons.BeanSlide : po == "prone" ? Icons.BeanProne : Icons.BeanCrouch;
+                Icons.Draw(new Rect(r.x + 1.5f, r.y + 1.5f, r.width, r.height), tex, new Color(0, 0, 0, .45f));
+                Icons.Draw(r, tex, new Color(1, 1, 1, p.ProneChangeK < 1f ? .55f + .45f * p.ProneChangeK : .95f));
+            }
+        }
+
+        // V22：GUIUtility.RotateAroundPivot 的支点按屏幕像素算，而 HUD 都在 GUI.matrix 缩放后的坐标里画 —— 非 1080p 时旋转中心会偏。先把支点换算到屏幕像素。
+        public static void RotP(float angle, Vector2 pivot) { GUIUtility.RotateAroundPivot(angle, GUI.matrix.MultiplyPoint3x4(pivot)); }
+        public static Vector2 ArcPoint(Vector2 c, float r, float deg) { float a = deg * Mathf.Deg2Rad; return new Vector2(c.x + Mathf.Sin(a) * r, c.y - Mathf.Cos(a) * r); }
+        // 角度 0 = 正上方，顺时针为正
+        public static void Arc(Vector2 c, float r, float a0, float a1, float thick, Color col)
+        {
+            int segs = Mathf.Max(2, Mathf.CeilToInt(Mathf.Abs(a1 - a0) / 1.5f));
+            float step = (a1 - a0) / segs, len = r * Mathf.Abs(step) * Mathf.Deg2Rad + .8f; var m = GUI.matrix;
+            for (int i = 0; i < segs; i++)
+            {
+                RotP(a0 + step * (i + .5f), c);
+                Fill(new Rect(c.x - len / 2, c.y - r - thick / 2, len, thick), col);
+                GUI.matrix = m;
+            }
+        }
+        static void Tick(Vector2 c, float r, float deg, float len, float thick, Color col)
+        {
+            var m = GUI.matrix; RotP(deg, c);
+            Fill(new Rect(c.x - thick / 2, c.y - r - len / 2, thick, len), col); GUI.matrix = m;
+        }
+
+        // 死亡回顾（参考图 UI-5）：骷髅抬头 → 击杀者 / 武器或技能 / 距离 → 豆子剪影命中点 + 每条伤害 → 对手剩余生命
+        // V22 打磨：字号放大（标题 24 / 正文 16），面板 760×494，1600×900 下也不挤；剪影上的命中点 18 px 带白边 + 深色描边
+        static GUIStyle rTitle, rText, rBold, rNum;
+        void Recap(float W, float H, Fighter p)
+        {
+            bool food = ToonAssets.Available;
+            if (rTitle == null)
+            {
+                rTitle = new GUIStyle(lab) { fontSize = 24, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                rText = new GUIStyle(lab) { fontSize = 16, alignment = TextAnchor.MiddleLeft };
+                rBold = new GUIStyle(rText) { fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+                rNum = new GUIStyle(rText) { fontSize = 17, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight };
+            }
+            Color bg = food ? new Color(1f, .93f, .95f, .97f) : new Color(.07f, .05f, .08f, .93f), card = food ? new Color(.98f, .84f, .89f, .92f) : new Color(.14f, .1f, .14f, .92f);
+            Color ink = food ? new Color(.36f, .14f, .24f) : new Color(1f, .92f, .9f), accent = food ? new Color(.93f, .38f, .55f) : new Color(1f, .4f, .35f), dim = food ? new Color(.58f, .4f, .48f) : new Color(.7f, .65f, .7f);
+            float age = Time.time - diedAt, ap = Mathf.Clamp01(age / .2f) * Mathf.Clamp01((7f - age) / .4f);
+            var oc = GUI.color; GUI.color = new Color(1, 1, 1, ap);
+            float pw = 760, ph = 494, x = W / 2 - pw / 2, y = H * .5f - ph / 2 + 20;
+            Round(new Rect(x, y, pw, ph), bg, 26); Round(new Rect(x, y, pw, ph), accent, 26, 2.5f);
+            Round(new Rect(W / 2 - 74, y - 34, 148, 64), accent, 30);
+            Icons.Draw(new Rect(W / 2 - 22, y - 29, 44, 44), Icons.Skull, Color.white);
+            LastHit(p, out var last); var k = p.recapKiller;
+            Text(new Rect(x + 20, y + 34, pw - 40, 38), RecapTitle(p), rTitle, ink);
+            // 第一行：击杀者头像 | 武器 / 技能 | 距离
+            Rect r1 = new Rect(x + 22, y + 82, pw - 44, 124); Round(r1, card, 16);
+            Rect face = new Rect(r1.x + 12, r1.y + 10, 140, 104);
+            Round(face, k != null ? new Color(k.Hero.tint.r, k.Hero.tint.g, k.Hero.tint.b, .5f) : new Color(.5f, .5f, .5f, .4f), 14);
+            if (k != null && Portraits.hero.TryGetValue(k.role, out var ft) && ft != null) GUI.DrawTextureWithTexCoords(face, ft, new Rect(.1f, .3f, .8f, .62f));
+            else Icons.Draw(new Rect(face.x + 36, face.y + 16, 68, 68), Icons.Skull, new Color(1, 1, 1, .8f));
+            Round(new Rect(face.x, face.yMax - 26, face.width, 26), new Color(0, 0, 0, .35f), 10);
+            Text(new Rect(face.x, face.yMax - 26, face.width, 26), k != null ? k.Hero.name : "环境", rBold, Color.white);
+            Fill(new Rect(r1.x + 168, r1.y + 16, 2, 92), new Color(ink.r, ink.g, ink.b, .25f));
+            Rect wr = new Rect(r1.x + 184, r1.y + 8, 330, 76);
+            if (last.gun != null) { var gi = GameUI.GunIcon(last.gun); if (gi != null) GUI.DrawTexture(wr, gi, ScaleMode.ScaleToFit); }
+            else Icons.Draw(new Rect(wr.center.x - 34, wr.y + 4, 68, 68), CauseIcon(last.kind, k), last.kind == DamageKind.Ult ? new Color(1f, .75f, .25f) : accent);
+            Text(new Rect(wr.x, r1.yMax - 34, wr.width, 28), last.weapon + "　·　" + DamageCtx.KindName(last.kind), new GUIStyle(rText) { alignment = TextAnchor.MiddleCenter }, ink);
+            Fill(new Rect(r1.x + 530, r1.y + 16, 2, 92), new Color(ink.r, ink.g, ink.b, .25f));
+            Rect dr = new Rect(r1.x + 546, r1.y + 18, r1.width - 560, 88);
+            Icons.Draw(new Rect(dr.center.x - 13, dr.y, 26, 26), Icons.Diamond, accent);
+            Round(new Rect(dr.x + 14, dr.y + 38, dr.width - 28, 38), new Color(ink.r, ink.g, ink.b, .12f), 19);
+            Text(new Rect(dr.x, dr.y + 38, dr.width, 38), last.distance.ToString("0") + " 米", new GUIStyle(rBold) { fontSize = 20 }, ink);
+            // 第二行：剪影命中点 + 伤害列表（最近 5 条）
+            Rect r2 = new Rect(x + 22, y + 218, pw - 44, 190); Round(r2, card, 16);
+            Rect body = new Rect(r2.x + 22, r2.y + 12, 136, 166);
+            Color silOutline = food ? new Color(ink.r, ink.g, ink.b, .55f) : new Color(0, 0, 0, .6f), silFill = food ? new Color(1f, .97f, .98f) : new Color(.8f, .8f, .86f);
+            for (int o = 0; o < 4; o++) { float ox = o == 0 ? -2 : o == 1 ? 2 : 0, oy = o == 2 ? -2 : o == 3 ? 2 : 0; Icons.Draw(new Rect(body.x + ox, body.y + oy, body.width, body.height), Icons.BeanStand, silOutline); }
+            Icons.Draw(body, Icons.BeanStand, silFill);
+            int start = Mathf.Max(0, p.damageLog.Count - 5), armSide = 0;
+            Color[] dots = { new Color(.92f, .2f, .35f), new Color(1f, .62f, .1f), new Color(.55f, .35f, 1f), new Color(.15f, .6f, 1f), new Color(.2f, .75f, .4f) };
+            Fill(new Rect(r2.x + 176, r2.y + 14, 2, 162), new Color(ink.r, ink.g, ink.b, .25f));
+            float maxDmg = 1; for (int i = start; i < p.damageLog.Count; i++) maxDmg = Mathf.Max(maxDmg, p.damageLog[i].hp + p.damageLog[i].armor);
             for (int i = start; i < p.damageLog.Count; i++)
             {
                 var h = p.damageLog[i];
-                string armor = h.cls > 0 ? "  ·  穿透 " + h.pen + " vs " + h.cls + " 级" + (h.pen >= h.cls ? "（打穿）" : "（被挡）") : "  ·  无护甲";
-                Label(new Rect(x + 18, y + 38 + (i - start) * 24, pw, 22), Ballistics.PartName(h.part) + "  ·  生命 -" + h.hp.ToString("0") + "  护甲 -" + h.armor.ToString("0") + armor + "  ·  " + h.attacker, Color.white);
+                Color dc = h.source == k && k != null ? dots[0] : dots[1 + (i - start) % (dots.Length - 1)];
+                if (h.hasPart)
+                {
+                    Vector2 dp = DotPos(h.part, ref armSide);
+                    Vector2 dpx = new Vector2(body.x + body.width * dp.x, body.y + body.height * dp.y);
+                    Round(new Rect(dpx.x - 11, dpx.y - 11, 22, 22), new Color(.2f, .05f, .12f, .6f), 11);   // 深色描边
+                    Round(new Rect(dpx.x - 10, dpx.y - 10, 20, 20), Color.white, 10);                       // 白边
+                    Round(new Rect(dpx.x - 7, dpx.y - 7, 14, 14), dc, 7);
+                }
+                else Round(new Rect(body.x - 4, body.y - 4, body.width + 8, body.height + 8), new Color(dc.r, dc.g, dc.b, .95f), 50, 3.5f);   // 爆炸 / 燃烧：整圈
+                float ry = r2.y + 14 + (i - start) * 34;
+                Round(new Rect(r2.x + 192, ry + 9, 16, 16), dc, 8);
+                Text(new Rect(r2.x + 216, ry, 200, 34), RowLabel(h) + " · " + h.attacker, rText, ink);
+                Rect bar = new Rect(r2.x + 420, ry + 10, 190, 14); Round(bar, new Color(ink.r, ink.g, ink.b, .15f), 7);
+                float hpW = bar.width * h.hp / maxDmg, arW = bar.width * h.armor / maxDmg;
+                if (hpW > 1) Round(new Rect(bar.x, bar.y, hpW, bar.height), accent, 7);
+                if (arW > 1) Round(new Rect(bar.x + hpW, bar.y, arW, bar.height), new Color(.35f, .7f, 1f), 7);
+                Text(new Rect(r2.x + 616, ry, r2.width - 630, 34), "-" + Mathf.RoundToInt(h.hp + h.armor), rNum, ink);
+            }
+            // 第三行：对手剩余生命
+            Rect r3 = new Rect(x + 22, y + 418, pw - 44, 62); Round(r3, card, 16);
+            if (k != null && k != p)
+            {
+                Round(new Rect(r3.x + 12, r3.y + 9, 44, 44), Config.TeamColor(k.team), 12);
+                if (Portraits.hero.TryGetValue(k.role, out var kt) && kt != null) GUI.DrawTextureWithTexCoords(new Rect(r3.x + 12, r3.y + 9, 44, 44), kt, new Rect(.25f, .62f, .5f, .35f));
+                Rect hb = new Rect(r3.x + 70, r3.y + 14, 250, 18); Round(hb, new Color(ink.r, ink.g, ink.b, .18f), 9);
+                float hk = Mathf.Clamp01(p.recapKillerHp / Config.MaxHp); if (hk > .01f) Round(new Rect(hb.x, hb.y, hb.width * hk, hb.height), new Color(.35f, .82f, .45f), 9);
+                Rect ab = new Rect(hb.x, hb.yMax + 5, 250, 8); Round(ab, new Color(ink.r, ink.g, ink.b, .12f), 4);
+                float ak = Mathf.Clamp01(p.recapKillerArmor / Config.MaxArmor); if (ak > .01f) Round(new Rect(ab.x, ab.y, ab.width * ak, ab.height), new Color(.35f, .7f, 1f), 4);
+                var kl = RecapKillerLine(p).Split(new[] { "　·　" }, System.StringSplitOptions.None);   // 两行：剩余生命 / 你打了他多少
+                Text(new Rect(r3.x + 336, r3.y + 4, r3.width - 346, 28), kl[0], new GUIStyle(rText) { fontStyle = FontStyle.Bold }, ink);
+                if (kl.Length > 1) Text(new Rect(r3.x + 336, r3.y + 30, r3.width - 346, 28), kl[1], new GUIStyle(rText) { fontSize = 15 }, dim);
+            }
+            else Text(new Rect(r3.x, r3.y, r3.width, 62), k == p ? "被自己的攻击击倒" : "没有对手（环境 / 爆炸）", new GUIStyle(rText) { alignment = TextAnchor.MiddleCenter }, dim);
+            GUI.color = oc;
+        }
+        static Vector2 DotPos(HitPart part, ref int armSide)
+        {
+            switch (part)
+            {
+                case HitPart.Head: return new Vector2(.5f, .2f);
+                case HitPart.Chest: return new Vector2(.5f, .44f);
+                case HitPart.Stomach: return new Vector2(.5f, .6f);
+                case HitPart.Arm: armSide++; return new Vector2(armSide % 2 == 1 ? .12f : .88f, .55f);
+                default: armSide++; return new Vector2(armSide % 2 == 1 ? .38f : .62f, .9f);
             }
         }
-        static void Fill(Rect r, Color c) { var o = GUI.color; GUI.color = c; GUI.DrawTexture(r, Texture2D.whiteTexture); GUI.color = o; }
-        static void Label(Rect r, string t, Color c, GUIStyle st = null) { st = st ?? lab; var o = st.normal.textColor; st.normal.textColor = c; GUI.Label(r, t, st); st.normal.textColor = o; }
+        public static Texture2D CauseIcon(DamageKind kind, Fighter k)
+        {
+            switch (kind)
+            {
+                case DamageKind.Skill: case DamageKind.Ult: return k != null ? Icons.Skill(k.role) : Icons.Skull;
+                case DamageKind.Melee: return Icons.Chevron;
+                case DamageKind.Fire: case DamageKind.Grenade: case DamageKind.Bomb: return Icons.Skill(Role.Ember);
+                default: return Icons.Skull;
+            }
+        }
+        static void Fill(Rect r, Color c) { var o = GUI.color; GUI.color = new Color(c.r, c.g, c.b, c.a * o.a); GUI.DrawTexture(r, Texture2D.whiteTexture); GUI.color = o; }
+        static void Round(Rect r, Color c, float radius, float border = 0) { GUI.DrawTexture(r, Texture2D.whiteTexture, ScaleMode.StretchToFill, true, 0, new Color(c.r, c.g, c.b, c.a * GUI.color.a), border, radius); }
+        static void Text(Rect r, string t, GUIStyle st, Color c) { var o = st.normal.textColor; st.normal.textColor = c; GUI.Label(r, t, st); st.normal.textColor = o; }
     }
 
     // ---------------------------------------------------------------- 靶场

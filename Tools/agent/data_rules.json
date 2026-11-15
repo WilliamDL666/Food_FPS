@@ -1,0 +1,54 @@
+{
+  "_说明": "数值表校验规则。ranges = [最小, 最大]，超出算错误；rules 是逐行检查的表达式，level=error 会让校验不通过，否则只是警告。策划改设计目标时同步改这里。",
+  "tables": {
+    "weapons.csv": {
+      "key": "id",
+      "columns": ["id", "name", "bodyDamage", "rpm", "fullRange", "falloffRange", "minFalloff", "pellets", "burst", "burstInterval", "magazine", "hipSpread", "adsSpread", "bloomPerShot", "maxBloom", "recoil", "adsZoom", "moveMultiplier", "bulletSpeed", "pen", "headMul", "chestMul", "stomachMul", "armMul", "legMul", "adsTime", "sprintToFire", "reloadTac", "reloadEmpty", "drawTime", "weight", "dropScale", "wallPen", "hDrift", "hRandom", "vRamp"],
+      "ranges": {
+        "bodyDamage": [1, 120], "rpm": [30, 1200], "fullRange": [1, 100], "falloffRange": [2, 150], "minFalloff": [0.1, 1],
+        "pellets": [1, 16], "burst": [1, 5], "burstInterval": [0, 0.3], "magazine": [1, 200],
+        "hipSpread": [0, 10], "adsSpread": [0, 6], "bloomPerShot": [0, 3], "maxBloom": [0, 8], "recoil": [0, 5],
+        "adsZoom": [1, 8], "moveMultiplier": [0.7, 1.15], "bulletSpeed": [50, 1000], "pen": [0, 6],
+        "headMul": [1, 4], "chestMul": [0.5, 1.5], "stomachMul": [0.5, 1.5], "armMul": [0.3, 1.2], "legMul": [0.3, 1.2],
+        "adsTime": [0.05, 0.8], "sprintToFire": [0.05, 0.5], "reloadTac": [0.5, 5], "reloadEmpty": [0.5, 6], "drawTime": [0.1, 1.5],
+        "weight": [0.5, 12], "dropScale": [0, 2], "wallPen": [0, 1], "hDrift": [0, 2], "hRandom": [0, 1], "vRamp": [0, 1]
+      },
+      "rules": [
+        { "expr": "headMul > chestMul >= stomachMul", "level": "error", "why": "部位倍率必须 头 > 胸 ≥ 腹（设计文档：部位倍率拉开枪法差距）" },
+        { "expr": "chestMul >= armMul and chestMul >= legMul", "level": "error", "why": "四肢倍率不能高于胸" },
+        { "expr": "falloffRange > fullRange", "level": "error", "why": "衰减结束距离必须大于满伤距离" },
+        { "expr": "reloadEmpty >= reloadTac", "level": "error", "why": "空仓换弹不能比战术换弹快" },
+        { "expr": "adsSpread <= hipSpread", "level": "error", "why": "开镜散布不能比腰射大" },
+        { "expr": "burst == 1 or burstInterval > 0", "level": "error", "why": "点射枪必须有点射间隔" },
+        { "expr": "adsTime <= 0.45", "level": "warn", "why": "开镜超过 0.45 秒手感会很拖" }
+      ]
+    },
+    "heroes.csv": {
+      "key": "role",
+      "columns": ["role", "name", "duty", "armorClass", "helmetClass", "skillCooldown", "skillCharges"],
+      "ranges": { "armorClass": [0, 6], "helmetClass": [0, 6], "skillCooldown": [3, 60], "skillCharges": [1, 4] },
+      "rules": []
+    },
+    "tuning_3c.csv": {
+      "kv": true,
+      "columns": ["key", "value"],
+      "required_keys": ["WalkSpeed", "SprintSpeed", "CrouchSpeed", "ProneSpeed", "JumpSpeed", "Gravity", "StaminaMax", "JumpBuffer", "CoyoteTime"],
+      "ranges": {
+        "WalkSpeed": [2, 9], "SprintSpeed": [3, 12], "CrouchSpeed": [1, 5], "ProneSpeed": [0.3, 3],
+        "Accel": [5, 120], "AirAccel": [0, 40], "JumpSpeed": [2, 12], "Gravity": [5, 40], "AdsMoveMul": [0.3, 1],
+        "StaminaMax": [10, 300], "SprintDrain": [0, 60], "StaminaRegen": [1, 100], "RegenDelay": [0, 5],
+        "JumpCost": [0, 50], "MantleCost": [0, 50], "ExhaustRecover": [0, 100],
+        "WeightFree": [0, 30], "WeightSpeedPerKg": [0, 0.1], "WeightAdsPerKg": [0, 0.2], "ArmorKgPerClass": [0, 5],
+        "CrouchSpreadMul": [0.2, 1.2], "ProneSpreadMul": [0.2, 1.2], "CrouchRecoilMul": [0.2, 1.2], "ProneRecoilMul": [0.2, 1.2],
+        "ProneTransition": [0, 2], "JumpBuffer": [0, 0.4], "CoyoteTime": [0, 0.3],
+        "AdsHold": [0, 1], "CrouchHold": [0, 1], "BobScale": [0, 3], "ShakeScale": [0, 3], "SprintFovAdd": [0, 20], "SlideFovAdd": [0, 25],
+        "HudStaminaFade": [0.3, 3], "HudExhaustPulseHz": [0.5, 6], "HudRecoverFlash": [0.1, 1]
+      },
+      "rules": [
+        { "expr": "SprintSpeed > WalkSpeed > CrouchSpeed > ProneSpeed", "level": "error", "why": "移动状态机：冲刺 > 行走 > 蹲 > 趴（姿态用速度换精度）" },
+        { "expr": "ProneSpreadMul <= CrouchSpreadMul <= 1", "level": "error", "why": "姿态越低越准" },
+        { "expr": "JumpSpeed ** 2 / (2 * Gravity) >= 0.55", "level": "error", "why": "跳跃高度必须 ≥ 0.55 米（翻越下限，关卡里的矮墙依赖它）" }
+      ]
+    }
+  }
+}
