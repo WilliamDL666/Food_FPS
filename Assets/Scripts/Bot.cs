@@ -270,9 +270,9 @@ namespace NeonSiege
             if (f.botMove.sqrMagnitude > .05f || Time.time - heardAt > 4f && !visible) return;
             Vector3 threat = visible && target != null ? target.Chest : lastKnown + Vector3.up * 1.3f;
             Vector3 eye = f.transform.position + Vector3.up * 1.62f;
-            if (Skills.LineClear(eye, threat, target)) return;
+            if (Skills.SightClear(eye, threat, target)) return;
             foreach (int side in new[] { 1, -1 })
-                if (Skills.LineClear(eye + f.transform.right * side * .38f, threat, target)) { f.botLean = side; return; }
+                if (Skills.SightClear(eye + f.transform.right * side * .38f, threat, target)) { f.botLean = side; return; }
         }
 
         float nextGrenadeThink;
@@ -493,7 +493,7 @@ namespace NeonSiege
 
         bool CanSee(Fighter e)
         {
-            return Skills.LineClear(f.Eye, e.Chest, e) || Skills.LineClear(f.Eye, e.Head, e);
+            return Skills.SightClear(f.Eye, e.Chest, e) || Skills.SightClear(f.Eye, e.Head, e);
         }
 
         void MoveAlong(Vector3 goal, bool allowSprint)

@@ -67,7 +67,7 @@ namespace NeonSiege
             }
         }
 
-        public static void Splat(Vector3 pos, Vector3 normal, Color c, float size)
+        public static GameObject Splat(Vector3 pos, Vector3 normal, Color c, float size)
         {
             int key = Mathf.RoundToInt(c.r * 31) * 1024 + Mathf.RoundToInt(c.g * 31) * 32 + Mathf.RoundToInt(c.b * 31);
             if (!splatMats.TryGetValue(key, out var m))
@@ -83,6 +83,7 @@ namespace NeonSiege
             var r = q.GetComponent<Renderer>(); r.sharedMaterial = m; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
             q.AddComponent<Decal>();
             q.AddComponent<SplatPop>();
+            return q;
         }
 
         public static readonly Color[] Confetti = { new Color(1f, .35f, .55f), new Color(.35f, .8f, 1f), new Color(1f, .88f, .25f), new Color(.45f, 1f, .6f), new Color(.8f, .5f, 1f), new Color(1f, .6f, .3f) };

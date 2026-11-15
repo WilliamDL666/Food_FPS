@@ -341,7 +341,7 @@ namespace NeonSiege
                 {
                     if (!f.alive) continue;
                     float d = Vector3.Distance(f.Chest, p);
-                    if (d < 5f && Skills.LineClear(p, f.Chest, f)) { DamageCtx.Set(DamageKind.Env, "爆炸桶"); f.ReceiveDamage(70f * (1 - d / 6f), lastHitter, p, false, true); }
+                    if (d < 5f && Skills.BlastClear(p, f.Chest, f)) { DamageCtx.Set(DamageKind.Env, "爆炸桶"); f.ReceiveDamage(70f * (1 - d / 6f), lastHitter, p, false, true); }
                 }
                 Match.I.NoiseAt(lastHitter, p);
             }
@@ -594,7 +594,7 @@ namespace NeonSiege
                 Vector3 to = f.Chest - eye;
                 if (to.magnitude > 28f || Vector3.Angle(head.forward, to) > 35f) continue;
                 if (Time.time < f.hiddenFromScanUntil) continue;
-                if (Skills.LineClear(eye, f.Chest, f)) f.revealedUntil = Mathf.Max(f.revealedUntil, Time.time + .6f);
+                if (Skills.SightClear(eye, f.Chest, f)) f.revealedUntil = Mathf.Max(f.revealedUntil, Time.time + .6f);
             }
         }
     }

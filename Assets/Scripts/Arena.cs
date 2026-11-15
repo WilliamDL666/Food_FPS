@@ -28,33 +28,35 @@ namespace NeonSiege
         public bool navReady;
 
         // 区域标注（地图更明显：小地图/大地图/进入提示/地面字）
-        public struct Zone { public string name, hint; public Rect area; public Color color; }
+        public struct Zone { public string name, hint; public Rect area; public Color color;
+            // V23 b：美食显示名（不改 name，遥测 first_contact_zone / 测试仍用 name）；大地图优先级 1–3（0 = 只在"当前位置"显示）；标签偏移（米，x / z）；高台高度（大地图写 "3.5 m"）
+            public string foodName; public int mapPriority; public Vector2 labelOffset; public float height; }
         public static readonly Zone[] Zones =
         {
-            new Zone { name = "A 点 · 货运广场", hint = "包点 A", area = Rect.MinMaxRect(26, 18, 48, 50), color = new Color(1f, .5f, .2f) },
-            new Zone { name = "B 点 · 工厂车间", hint = "包点 B", area = Rect.MinMaxRect(26, -50, 48, -18), color = new Color(.3f, .8f, 1f) },
-            new Zone { name = "攻方集结区", hint = "进攻方出生点", area = Rect.MinMaxRect(-72, -10, -56, 10), color = new Color(1f, .45f, .2f) },
-            new Zone { name = "守方安保站", hint = "防守方出生点", area = Rect.MinMaxRect(56, -10, 72, 10), color = new Color(.3f, .7f, 1f) },
-            new Zone { name = "北小巷", hint = "主街 ↔ 北长街", area = Rect.MinMaxRect(-24, 10, -18, 30), color = new Color(1f, .3f, .7f) },
-            new Zone { name = "南小巷", hint = "主街 ↔ 南工厂通道 · 卷帘门", area = Rect.MinMaxRect(-36, -30, -30, -10), color = new Color(.7f, .4f, 1f) },
+            new Zone { name = "A 点 · 货运广场", foodName = "A 点 · 汉堡广场", mapPriority = 1, labelOffset = new Vector2(0, 9), hint = "包点 A", area = Rect.MinMaxRect(26, 18, 48, 50), color = new Color(1f, .5f, .2f) },
+            new Zone { name = "B 点 · 工厂车间", foodName = "B 点 · 布丁工坊", mapPriority = 1, labelOffset = new Vector2(0, -9), hint = "包点 B", area = Rect.MinMaxRect(26, -50, 48, -18), color = new Color(.3f, .8f, 1f) },
+            new Zone { name = "攻方集结区", foodName = "西门备餐区", mapPriority = 1, hint = "进攻方出生点", area = Rect.MinMaxRect(-72, -10, -56, 10), color = new Color(1f, .45f, .2f) },
+            new Zone { name = "守方安保站", foodName = "东门出餐口", mapPriority = 1, hint = "防守方出生点", area = Rect.MinMaxRect(56, -10, 72, 10), color = new Color(.3f, .7f, 1f) },
+            new Zone { name = "北小巷", foodName = "北小巷", mapPriority = 0, hint = "主街 ↔ 北长街", area = Rect.MinMaxRect(-24, 10, -18, 30), color = new Color(1f, .3f, .7f) },
+            new Zone { name = "南小巷", foodName = "南小巷", mapPriority = 0, hint = "主街 ↔ 南工厂通道 · 卷帘门", area = Rect.MinMaxRect(-36, -30, -30, -10), color = new Color(.7f, .4f, 1f) },
             // V22 第二期（方案甲）：两条中段连接 + 中段十字 + 奶油平台
-            new Zone { name = "北烤串巷", hint = "主街 ↔ 北长街中段 · 外卖阳台 3.5 m", area = Rect.MinMaxRect(-5, 10, 1, 30), color = new Color(1f, .55f, .35f) },
-            new Zone { name = "南后厨", hint = "主街 ↔ 南长街中段 · 室内厨房 · 蒸汽阀", area = Rect.MinMaxRect(-5, -30, 1, -10), color = new Color(1f, .7f, .5f) },
-            new Zone { name = "北关口 · 蒸笼门", hint = "默认开着 · 守方长按 G 盖上（巨响）· 墙洞可钻", area = Rect.MinMaxRect(0, 30, 14, 50), color = new Color(1f, .7f, .35f) },
-            new Zone { name = "南关口 · 蒸笼门", hint = "默认开着 · 守方长按 G 盖上（巨响）· 火锅热气", area = Rect.MinMaxRect(0, -50, 14, -30), color = new Color(1f, .7f, .35f) },
-            new Zone { name = "市场楼顶", hint = "高台 · 东侧楼梯 / 弹射板上来 · 横幅挡住主街西段", area = Rect.MinMaxRect(30, -9, 44, 9), color = new Color(.95f, .35f, .35f) },
-            new Zone { name = "中庭 · 奶油平台", hint = "3.5 m 中层 · 西坡道 / 东楼梯 · 俯看两个连廊口", area = Rect.MinMaxRect(10, -6, 24, 6), color = new Color(1f, .7f, .85f) },
-            new Zone { name = "中段十字", hint = "空中连廊下 · 北烤串巷 ↑ / 南后厨 ↓", area = Rect.MinMaxRect(-12, -10, 4, 10), color = new Color(1f, .4f, .6f) },
-            new Zone { name = "夜市主街", hint = "中路 · 通往中庭", area = Rect.MinMaxRect(-56, -10, 14, 10), color = new Color(1f, .25f, .7f) },
-            new Zone { name = "北长街", hint = "通往 A 点", area = Rect.MinMaxRect(-72, 30, 26, 50), color = new Color(1f, .6f, .2f) },
-            new Zone { name = "南工厂通道", hint = "通往 B 点", area = Rect.MinMaxRect(-72, -50, 26, -30), color = new Color(.6f, .35f, 1f) },
-            new Zone { name = "西侧通道", hint = "攻方出生 ↔ 北长街", area = Rect.MinMaxRect(-72, 10, -56, 30), color = new Color(1f, .7f, .4f) },
-            new Zone { name = "西侧通道", hint = "攻方出生 ↔ 南工厂通道", area = Rect.MinMaxRect(-72, -30, -56, -10), color = new Color(1f, .7f, .4f) },
-            new Zone { name = "A 连廊", hint = "中庭 ↔ A 点 · 卷帘门", area = Rect.MinMaxRect(14, 10, 26, 24), color = new Color(1f, .55f, .2f) },
-            new Zone { name = "B 连廊", hint = "中庭 ↔ B 点 · 卷帘门", area = Rect.MinMaxRect(14, -24, 26, -10), color = new Color(.3f, .8f, 1f) },
-            new Zone { name = "中庭西口", hint = "分路 A / B", area = Rect.MinMaxRect(14, -10, 30, 10), color = new Color(.3f, 1f, .9f) },
-            new Zone { name = "中央市场", hint = "防守方转点枢纽", area = Rect.MinMaxRect(26, -18, 56, 18), color = new Color(.3f, 1f, .9f) },
-            new Zone { name = "东侧通道", hint = "守方 ↔ 包点", area = Rect.MinMaxRect(48, -50, 72, 50), color = new Color(.4f, .7f, 1f) },
+            new Zone { name = "北烤串巷", foodName = "北烤串巷", mapPriority = 3, hint = "主街 ↔ 北长街中段 · 外卖阳台 3.5 m", area = Rect.MinMaxRect(-5, 10, 1, 30), color = new Color(1f, .55f, .35f) },
+            new Zone { name = "南后厨", foodName = "南后厨", mapPriority = 3, hint = "主街 ↔ 南长街中段 · 室内厨房 · 蒸汽阀", area = Rect.MinMaxRect(-5, -30, 1, -10), color = new Color(1f, .7f, .5f) },
+            new Zone { name = "北关口 · 蒸笼门", foodName = "北蒸笼关", mapPriority = 2, hint = "默认开着 · 守方长按 G 盖上（巨响）· 墙洞可钻", area = Rect.MinMaxRect(0, 30, 14, 50), color = new Color(1f, .7f, .35f) },
+            new Zone { name = "南关口 · 蒸笼门", foodName = "南蒸笼关", mapPriority = 2, hint = "默认开着 · 守方长按 G 盖上（巨响）· 火锅热气", area = Rect.MinMaxRect(0, -50, 14, -30), color = new Color(1f, .7f, .35f) },
+            new Zone { name = "市场楼顶", foodName = "市场楼顶", mapPriority = 0, height = 8f, hint = "高台 · 东侧楼梯 / 弹射板上来 · 横幅挡住主街西段", area = Rect.MinMaxRect(30, -9, 44, 9), color = new Color(.95f, .35f, .35f) },
+            new Zone { name = "中庭 · 奶油平台", foodName = "奶油平台", mapPriority = 0, height = 3.5f, hint = "3.5 m 中层 · 西坡道 / 东楼梯 · 俯看两个连廊口", area = Rect.MinMaxRect(10, -6, 24, 6), color = new Color(1f, .7f, .85f) },
+            new Zone { name = "中段十字", foodName = "中段十字", mapPriority = 0, hint = "空中连廊下 · 北烤串巷 ↑ / 南后厨 ↓", area = Rect.MinMaxRect(-12, -10, 4, 10), color = new Color(1f, .4f, .6f) },
+            new Zone { name = "夜市主街", foodName = "夜市主街", mapPriority = 2, labelOffset = new Vector2(-8, 0), hint = "中路 · 通往中庭", area = Rect.MinMaxRect(-56, -10, 14, 10), color = new Color(1f, .25f, .7f) },
+            new Zone { name = "北长街", foodName = "北甜品长街", mapPriority = 2, labelOffset = new Vector2(-14, 0), hint = "通往 A 点", area = Rect.MinMaxRect(-72, 30, 26, 50), color = new Color(1f, .6f, .2f) },
+            new Zone { name = "南工厂通道", foodName = "南烧烤长街", mapPriority = 2, labelOffset = new Vector2(-14, 0), hint = "通往 B 点", area = Rect.MinMaxRect(-72, -50, 26, -30), color = new Color(.6f, .35f, 1f) },
+            new Zone { name = "西侧通道", foodName = "西侧小道", mapPriority = 0, hint = "攻方出生 ↔ 北长街", area = Rect.MinMaxRect(-72, 10, -56, 30), color = new Color(1f, .7f, .4f) },
+            new Zone { name = "西侧通道", foodName = "西侧小道", mapPriority = 0, hint = "攻方出生 ↔ 南工厂通道", area = Rect.MinMaxRect(-72, -30, -56, -10), color = new Color(1f, .7f, .4f) },
+            new Zone { name = "A 连廊", foodName = "A 连廊", mapPriority = 3, hint = "中庭 ↔ A 点 · 卷帘门", area = Rect.MinMaxRect(14, 10, 26, 24), color = new Color(1f, .55f, .2f) },
+            new Zone { name = "B 连廊", foodName = "B 连廊", mapPriority = 3, hint = "中庭 ↔ B 点 · 卷帘门", area = Rect.MinMaxRect(14, -24, 26, -10), color = new Color(.3f, .8f, 1f) },
+            new Zone { name = "中庭西口", foodName = "奶油中庭", mapPriority = 2, hint = "分路 A / B", area = Rect.MinMaxRect(14, -10, 30, 10), color = new Color(.3f, 1f, .9f) },
+            new Zone { name = "中央市场", foodName = "中央市场", mapPriority = 3, labelOffset = new Vector2(0, 11), hint = "防守方转点枢纽", area = Rect.MinMaxRect(26, -18, 56, 18), color = new Color(.3f, 1f, .9f) },
+            new Zone { name = "东侧通道", foodName = "东奶茶巷", mapPriority = 3, labelOffset = new Vector2(0, 26), hint = "守方 ↔ 包点", area = Rect.MinMaxRect(48, -50, 72, 50), color = new Color(.4f, .7f, 1f) },
         };
         public static int ZoneAt(Vector3 p)
         {

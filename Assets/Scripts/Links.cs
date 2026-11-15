@@ -226,9 +226,9 @@ namespace NeonSiege
         public static List<Steam> SteamSources()
         {
             var l = new List<Steam>();
-            if (SteamCloud.Suppressed) return l;   // 冰淇淋散了热气：所有蒸汽都失效
-            foreach (var h in HotpotHazard.All) if (h != null) l.Add(new Steam { key = h, center = h.SteamCenter, name = h.name.Contains("关东煮") ? "关东煮热气" : "火锅热气" });
-            foreach (var v in SteamValve.Valves) if (v != null && v.Active) l.Add(new Steam { key = v, center = v.CloudCenter, name = v.transform.position.x < 5f ? "后厨蒸汽阀" : "蒸汽阀" });
+            // V23：冰淇淋散热气改局部，只剔除被散掉的那些蒸汽源
+            foreach (var h in HotpotHazard.All) if (h != null && !SteamCloud.SuppressedAt(h.SteamCenter)) l.Add(new Steam { key = h, center = h.SteamCenter, name = h.name.Contains("关东煮") ? "关东煮热气" : "火锅热气" });
+            foreach (var v in SteamValve.Valves) if (v != null && v.Active && !SteamCloud.SuppressedAt(v.CloudCenter)) l.Add(new Steam { key = v, center = v.CloudCenter, name = v.transform.position.x < 5f ? "后厨蒸汽阀" : "蒸汽阀" });
             return l;
         }
         public static bool SteamNear(Vector3 p, float r, out Steam s)
@@ -435,7 +435,7 @@ namespace NeonSiege
         }
         void Update()
         {
-            if (SteamCloud.Suppressed) { if (Match.I != null) Match.I.Feed("冰淇淋吹散了热气 · 棉花糖蒸汽一起散了", new Color(.7f, .95f, 1f)); Destroy(gameObject); return; }   // 反制
+            if (SteamCloud.SuppressedAt(transform.position)) { if (Match.I != null) Match.I.Feed("冰淇淋吹散了热气 · 棉花糖蒸汽一起散了", new Color(.7f, .95f, 1f)); Destroy(gameObject); return; }   // 反制
             float age = Time.time - born, left = until - Time.time;
             float k = Mathf.Min(Mathf.Clamp01(age / .35f), Mathf.Clamp01(left / .5f));
             transform.localScale = Vector3.one * Mathf.Lerp(.2f, 1f, Mathf.SmoothStep(0, 1, k));
@@ -506,7 +506,7 @@ namespace NeonSiege
                 if (!e.alive || SameTeam(e, f) || e == f) continue;
                 Vector3 to = e.Chest - f.Eye; if (to.magnitude > 90f) continue;
                 float ang = Vector3.Angle(f.AimDir, to);
-                if (ang < ba && Skills.LineClear(f.Eye, e.Chest, e)) { ba = ang; best = e; }
+                if (ang < ba && Skills.SightClear(f.Eye, e.Chest, e)) { ba = ang; best = e; }
             }
             if (best != null) return Create(f, PingKind.Enemy, best.Chest, best);
             Vector3 hp = f.Eye + f.AimDir * 40f; Collider hc = null; float hd = float.MaxValue;

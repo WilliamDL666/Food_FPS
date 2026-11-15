@@ -9,6 +9,10 @@ namespace NeonSiege
         public const float Fuse = 2.5f, Radius = 6.5f, MaxDamage = 95f, Speed = 17f;
         public Fighter owner; public Vector3 velocity;
         float born; Light lamp; float nextBlink;
+        // V23 A1：直接砸中曼妥思瓶子时，原来按普通墙面 ×0.42 反弹 —— 全速砸过去会被弹回 4–6 m，落到 4.5 m 触发圈外，"炸曼妥思没反应"。
+        // 修法：碰到曼妥思 = 记下这堆曼妥思（爆炸时不论滚到哪都触发它），并且瓶子是软的糖堆，几乎不反弹（×0.12）。引信、伤害、半径不变。
+        public static bool MentosFix = true;   // 测试用：关掉可复现旧行为
+        public MentosPile touched;
 
         public static Grenade Throw(Fighter f, Vector3 velocity)
         {
@@ -51,7 +55,9 @@ namespace NeonSiege
             {
                 if (owner != null && hit.collider.transform.IsChildOf(owner.transform) && age < .3f) continue;
                 next = hit.point + hit.normal * .07f;
-                velocity = Vector3.Reflect(velocity, hit.normal) * .42f;
+                var pile = MentosFix ? hit.collider.GetComponentInParent<MentosPile>() : null;
+                if (pile != null) touched = pile;
+                velocity = Vector3.Reflect(velocity, hit.normal) * (pile != null ? .12f : .42f);
                 if (hit.normal.y > .7f) { velocity.x *= .7f; velocity.z *= .7f; }   // ground friction
                 if (velocity.magnitude > 1.2f) Sfx.Play("impactMetal_light", hit.point, .35f, 1.7f, 1f, 22f);
                 break;
@@ -65,6 +71,7 @@ namespace NeonSiege
             if (age >= Fuse) Explode();
         }
 
+        public void Detonate() { Explode(); }   // V23：测试用，立即引爆
         void Explode()
         {
             Vector3 p = transform.position;
@@ -85,7 +92,7 @@ namespace NeonSiege
                 }
             }
             Sfx.Play("boom_far", p, .7f, 1f, 1f, 400f);
-            if (ToonAssets.Available) MentosPile.TryFountain(p, owner);   // 汽水 + 曼妥思
+            if (ToonAssets.Available) MentosPile.TryFountain(p, owner, touched);   // 汽水 + 曼妥思（V23：砸中过瓶子的也算）
             float rad = Radius * (ToonAssets.Available && owner != null && owner.role == Role.Ember ? 1.2f : 1f);   // 焚芯被动
             if (Match.I != null)
                 foreach (var f in Match.I.fighters)
@@ -94,7 +101,7 @@ namespace NeonSiege
                     float d = Vector3.Distance(f.Chest, p);
                     if (d > rad) continue;
                     if (owner != null && f != owner && f.team == owner.team) continue;
-                    if (!Skills.LineClear(p + Vector3.up * .2f, f.Chest, f)) continue;
+                    if (!Skills.BlastClear(p + Vector3.up * .2f, f.Chest, f)) continue;
                     float dmg = MaxDamage * Mathf.Clamp01(1f - d / rad) * (f == owner ? .5f : 1f);
                     if (dmg < 4f) continue;
                     DamageCtx.Set(DamageKind.Grenade, ToonAssets.Available ? "汽水罐手雷" : "手雷"); f.ReceiveDamage(dmg, owner, p, false, true);

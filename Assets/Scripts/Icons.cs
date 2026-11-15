@@ -101,8 +101,18 @@ namespace NeonSiege
         }
 
         // Ability glyphs, one per hero (drawn inside a hexagon by the UI).
+        // V23：美食模式用美食图标（Tools/make_skill_icons.py 生成 → Resources/Icons/SkillFood_<Role>.png）：汽水罐、威化、布丁、芥末竹签、带蜡烛纸杯、棉花糖棒
+        public static Texture2D FoodSkill(Role r)
+        {
+            string key = "foodsk_" + r;
+            if (cache.TryGetValue(key, out var t) && t != null) return t;
+            t = Resources.Load<Texture2D>("Icons/SkillFood_" + r);
+            if (t != null) cache[key] = t;
+            return t;
+        }
         public static Texture2D Skill(Role r)
         {
+            if (ToonAssets.Available) { var ft = FoodSkill(r); if (ft != null) return ft; }
             switch (r)
             {
                 case Role.Falcon:   // speed chevrons

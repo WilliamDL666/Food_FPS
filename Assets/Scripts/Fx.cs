@@ -69,6 +69,9 @@ namespace NeonSiege
             return false;
         }
 
+        public static bool Has(string group) { Load(); return groups.TryGetValue(group, out var l) && l.Count > 0; }   // V23：测试读音效分组是否加载
+        public static int Variants(string group) { Load(); return groups.TryGetValue(group, out var l) ? l.Count : 0; }
+
         public static void Ui(string group, float volume = .5f, float pitch = 1f)
         {
             Play(group, Camera.main != null ? Camera.main.transform.position : Vector3.zero, volume, pitch, 0f);

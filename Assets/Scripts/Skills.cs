@@ -178,6 +178,7 @@ namespace NeonSiege
                 case Role.Ember: Throw(f, f.human ? ThrowVelocity(f, 15f) : VelocityTo(f.Eye, target, 32f), false); break;
                 case Role.Phantom: SpawnNoise(f, f.human ? target : GroundAt(target)); break;
             }
+            SkillHand.Play(f, f.role);   // V23：第一人称左手动作（时长 ≤ 现有锁定时间，不新增不能开火的时间）
             f.skillCharges--; f.stats.skillUses++;
             if (f.skillRechargeAt <= Time.time) f.skillRechargeAt = Time.time + f.Hero.skill.cooldown;
             Match.I.SkillCue(f);
@@ -203,8 +204,9 @@ namespace NeonSiege
             if (Food)
             {
                 // 汽水冲刺：开罐"嘶"一声（音量和可听距离与原喷射声相同：1.0 / 40 m，反制靠听）
-                Sfx.Play("food_fizz", f.transform.position, 1f, 1.1f, 1f, 40f);
-                Sfx.Play("thrusterFire", f.transform.position, .35f, 1.6f, 1f, 40f);   // 叠一层轻的喷气声当"可乐喷射"（T01 用它判定启动音效）
+                // V23：前摇 = 摇罐（开罐声由 SkillHand 在前摇 60% 处播）；气泡喷射声在 DashRunner 进入位移时播（1.0 / 40 m，可听距离不变）
+                Sfx.Play("food_can_shake", f.transform.position, .9f, 1f, 1f, 40f);
+                Sfx.Play("thrusterFire", f.transform.position, .18f, 1.6f, 1f, 40f);   // 保留一层极轻的喷气声（0.18，T01 用它判定启动音效；拍板后可去掉）
                 Fx.Burst(f.transform.position + Vector3.up * .9f - dir * .4f, -dir, Cola, 30, 4, .12f, .4f, 0);
                 Fx.Burst(f.transform.position + Vector3.up * 1.1f, Vector3.up, Bubble, 14, 2, .07f, .4f, -.2f);
             }
@@ -224,8 +226,11 @@ namespace NeonSiege
                 // 落地打个饱嗝：脚下炸开一圈白色气泡
                 Fx.Shockwave(f.transform.position, 4f, Bubble, .4f);
                 Fx.Burst(f.transform.position + Vector3.up * .2f, Vector3.up, Bubble, 30, 3.5f, .1f, .6f, -.1f);
-                Sfx.Play("food_boing", f.transform.position, .9f, .55f, 1f, 30f);
+                Sfx.Play("food_burp", f.transform.position, .9f, 1f, 1f, 30f);   // V23：落地打个饱嗝（签名音）
                 Fx.Burst(f.Chest, Vector3.up, Cola, 18, 3, .08f, .5f, 0);
+                // V23：脚下一圈可乐泡沫水渍，存在时间 = 减伤时间（敌人看地面就知道他还有减伤）
+                if (Physics.Raycast(f.transform.position + Vector3.up * .5f, Vector3.down, out RaycastHit gh, 2f, ~0, QueryTriggerInteraction.Ignore))
+                { var q = FoodFx.Splat(gh.point, gh.normal, new Color(.75f, .5f, .3f), 1.6f); if (q != null) Object.Destroy(q, Config.DashGuardTime); }
                 return;
             }
             Fx.Shockwave(f.transform.position, 4f, new Color(.4f, .8f, 1f), .4f);
@@ -268,7 +273,7 @@ namespace NeonSiege
             go.transform.position = point; go.transform.rotation = rot;
             go.AddComponent<DeployedCover>().Init(f);
             spawned.Add(go);
-            if (Food) { Sfx.Play("food_squish", point, .9f, 1f, 1f, 40f); Sfx.Play("food_popcorn", point, .6f, .8f, 1f, 30f); }   // 挤奶油 + 咔嚓
+            if (Food) Sfx.Play("food_squish", point, .7f, 1f, 1f, 40f);   // 挤奶油；V23：每叠一层一声"咔嚓"在 DeployedCover.Update 里播（3 声 = 3 层 = 0.6 s）
             else Sfx.Play("forceField", point, .9f, 1.1f, 1f, 40f);
         }
 
@@ -282,7 +287,7 @@ namespace NeonSiege
             go.AddComponent<ShieldWall>().Init(f);
             f.shieldActiveUntil = Time.time + Config.ShieldLife;
             spawned.Add(go);
-            if (Food) Sfx.Play("food_boing", go.transform.position, 1f, .7f, 1f, 45f);
+            if (Food) Sfx.Play("food_jelly_boing", go.transform.position, 1f, 1f, 1f, 45f);   // V23：低沉"啵嘤"，45 m 不变
             else Sfx.Play("forceField", go.transform.position, 1f, .7f, 1f, 45f);
         }
 
@@ -322,7 +327,7 @@ namespace NeonSiege
             var proj = go.AddComponent<Arrow>(); proj.owner = f; proj.velocity = velocity;
             spawned.Add(go);
             Sfx.Play("impactPunch_medium", go.transform.position, .7f, 1.8f, f.human ? .3f : 1f, 25f);
-            Sfx.Play(Food ? "food_fizz" : "thrusterFire", go.transform.position, .25f, 2.4f, f.human ? .3f : 1f, 20f);
+            Sfx.Play(Food ? "food_squish" : "thrusterFire", go.transform.position, .25f, 2.4f, f.human ? .3f : 1f, 20f);   // V23：抹一下芥末
         }
 
         static Transform Part(Transform parent, PrimitiveType type, Vector3 pos, Vector3 euler, Vector3 scale, Material m)
@@ -369,7 +374,8 @@ namespace NeonSiege
             var proj = go.AddComponent<Thrown>();
             proj.owner = f; proj.velocity = velocity; proj.drone = drone;
             spawned.Add(go);
-            Sfx.Play("click", go.transform.position, .8f, .8f, 1f, 25f);
+            Sfx.Play("click", go.transform.position, .8f, .8f, 1f, 25f);   // 打火机"咔"
+            if (!drone && Food) Fx.Burst(go.transform.position, Vector3.up, new Color(1f, .75f, .3f), 6, 1.5f, .04f, .3f, 0);   // V23：点火的火星
         }
 
         // V21：点火纸杯蛋糕的外观（直径约 0.3 m，插一根烟花蜡烛）；投掷体和判定不变
@@ -383,8 +389,8 @@ namespace NeonSiege
             var holder = new GameObject("纸杯").transform; holder.SetParent(t, false);
             Vector3 ls = t.lossyScale; holder.localScale = new Vector3(1f / Mathf.Max(.01f, ls.x), 1f / Mathf.Max(.01f, ls.y), 1f / Mathf.Max(.01f, ls.z));
             cup.transform.SetParent(holder, false); cup.transform.localPosition = new Vector3(0, -.12f, 0);
-            Part(holder, PrimitiveType.Cylinder, new Vector3(0, .13f, 0), Vector3.zero, new Vector3(.025f, .07f, .025f), Arena.Glow(new Color(1f, .4f, .6f), 1f));   // 烟花蜡烛
-            Part(holder, PrimitiveType.Sphere, new Vector3(0, .22f, 0), Vector3.zero, Vector3.one * .045f, Arena.Glow(new Color(1f, .7f, .2f), 6f));             // 火苗
+            Part(holder, PrimitiveType.Cylinder, new Vector3(0, .13f, 0), Vector3.zero, new Vector3(.025f, .07f, .025f), Arena.Glow(new Color(1f, .4f, .6f), 1f)).name = "蜡烛";   // 烟花蜡烛（V23：引信期间越烧越短）
+            Part(holder, PrimitiveType.Sphere, new Vector3(0, .22f, 0), Vector3.zero, Vector3.one * .045f, Arena.Glow(new Color(1f, .7f, .2f), 6f)).name = "火苗";             // 火苗
         }
 
         // 焚芯爆破后的燃烧区：持续伤害敌人，迫使其离开点位
@@ -450,7 +456,11 @@ namespace NeonSiege
             go.transform.position = point;
             go.AddComponent<NoiseField>().Init(f);
             spawned.Add(go);
-            if (Food) { Sfx.Play("food_squish", point, 1f, .6f, 1f, 45f); Sfx.Play("food_popcorn", point, .8f, 1.4f, 1f, 45f); }   // "噗"地膨出 + 跳跳糖噼啪
+            if (Food)
+            {
+                Sfx.Play("food_marsh_puff", point, 1f, 1f, 1f, 45f); Sfx.Play("food_poprock_loop", point, .7f, 1f, 1f, 45f);   // V23："噗"地膨出 + 跳跳糖噼啪（45 m 不变）
+                Fx.Tracer(f.Eye + f.transform.right * -.25f + Vector3.down * .2f, point + Vector3.up * .5f, Marsh, .05f);   // 左手甩出去的一条糖丝
+            }
             else Sfx.Play("glitch", point, 1f, .8f, 1f, 45f);
         }
 
@@ -473,14 +483,41 @@ namespace NeonSiege
             if (source.role == Role.Falcon && dashEndedAt.TryGetValue(source, out float t) && Time.time - t < 2.5f)
             {
                 source.stats.skillEffective++; dashEndedAt.Remove(source);
+                if (Food) SkillPop.Show(source, "续杯！", Caramel);   // V23：结果字 = 遥测有效判定
             }
         }
 
         public static void NotifyKill(Fighter killer, Fighter victim) { }
 
-        public static bool LineClear(Vector3 a, Vector3 b, Fighter target)
+        // V23：汽水冲刺的可乐尾迹（棕色 + 白色气泡，0.7 s 消散）
+        public static TrailRenderer ColaTrail(Fighter f)
+        {
+            var go = new GameObject("可乐尾迹"); go.transform.SetParent(f.transform, false); go.transform.localPosition = new Vector3(0, 1f, -.3f);
+            var tr = go.AddComponent<TrailRenderer>(); tr.time = .7f; tr.startWidth = .55f; tr.endWidth = .05f; tr.material = FoodFx.TrailMaterial;
+            tr.startColor = new Color(Cola.r, Cola.g, Cola.b, .85f); tr.endColor = new Color(Bubble.r, Bubble.g, Bubble.b, 0f); tr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            return tr;
+        }
+        // V23：芥末味的"波浪形烟环"（不是正圆）
+        public static void WavyCircle(LineRenderer lr, Vector3 center, float r, float phase)
+        {
+            lr.loop = true; lr.positionCount = 64;
+            for (int i = 0; i < 64; i++)
+            {
+                float a = i / 64f * Mathf.PI * 2, rr = r * (1f + .09f * Mathf.Sin(a * 6f + phase * 5f) + .05f * Mathf.Sin(a * 11f - phase * 3f));
+                lr.SetPosition(i, center + new Vector3(Mathf.Cos(a) * rr, .12f + .1f * Mathf.Sin(a * 4f + phase * 4f), Mathf.Sin(a) * rr));
+            }
+        }
+
+        // V23 a-1：原 LineClear 同时管"看不看得见"和"炸不炸得到"，第一行就查蒸汽 → 站在热气里的人手雷炸不到。拆成两个：
+        //   SightClear = 视线（蒸汽 / 棉花糖蒸汽等遮挡 + 实体几何），给 AI 视野、监控、芥末扫描、标记、头像用；
+        //   BlastClear = 爆炸（只看实体几何），给手雷、纸杯蛋糕、爆炸桶用 —— 往蒸汽里扔雷是最自然的反制，不能被雾挡掉。
+        public static bool SightClear(Vector3 a, Vector3 b, Fighter target)
         {
             if (SteamCloud.Blocks(a, b)) return false;   // V17：火锅热气挡视线
+            return BlastClear(a, b, target);
+        }
+        public static bool BlastClear(Vector3 a, Vector3 b, Fighter target)
+        {
             var hits = Physics.RaycastAll(a, (b - a).normalized, Vector3.Distance(a, b), ~0, QueryTriggerInteraction.Ignore);
             foreach (var h in hits)
             {
@@ -495,20 +532,22 @@ namespace NeonSiege
 
     public class DashRunner : MonoBehaviour
     {
-        public Fighter owner; public Vector3 dir; float t, nextGhost; Light glow;
+        public Fighter owner; public Vector3 dir; float t, nextGhost; Light glow; bool fizzed; TrailRenderer trail;
         void Start()
         {
             glow = new GameObject("喷射光").AddComponent<Light>(); glow.transform.SetParent(owner.transform, false);
             glow.transform.localPosition = new Vector3(0, 1f, -.5f); glow.color = Skills.Food ? Skills.Caramel : new Color(.4f, .7f, 1f); glow.range = 6; glow.intensity = 4;
             Fx.Shockwave(owner.transform.position, 2.5f, Skills.Food ? Skills.Bubble : new Color(.4f, .7f, 1f), .3f);
         }
-        void OnDestroy() { if (glow != null) Destroy(glow.gameObject); }
+        void OnDestroy() { if (glow != null) Destroy(glow.gameObject); if (trail != null) { trail.transform.SetParent(null, true); trail.emitting = false; Destroy(trail.gameObject, trail.time + .1f); } }
         void Update()
         {
             t += Time.deltaTime;
             if (owner == null || !owner.alive) { Destroy(this); return; }
             Fx.Burst(owner.transform.position + Vector3.up * 1.1f - owner.transform.forward * .35f, -dir + Vector3.down * .3f, Skills.Food ? Skills.Cola : new Color(.4f, .75f, 1f), 4, 5, .12f, .25f, 0);   // 背后喷可乐泡沫
             if (t < Config.DashWindup) return;
+            if (!fizzed) { fizzed = true; if (Skills.Food) { Sfx.Play("food_fizz", owner.transform.position, 1f, 1.1f, 1f, 40f); if (trail == null) trail = Skills.ColaTrail(owner); } }   // V23：进入位移才喷气泡；身后拉可乐尾迹
+            if (Skills.Food && owner.human) SkillPop.EdgeBubbles = 1f;   // 屏幕边缘一圈焦糖色气泡流
             if (Time.time >= nextGhost) { nextGhost = Time.time + .035f; Ghost.Spawn(owner, Skills.Food ? new Color(.6f, .75f, .9f) : new Color(.3f, .7f, 1f)); }   // 半透明气泡色残影
             float k = Mathf.Min(Time.deltaTime, Config.DashWindup + Config.DashTime - (t - Time.deltaTime));
             if (k > 0) owner.ApplyDash(dir * (Config.DashDistance / Config.DashTime) * k);
@@ -598,12 +637,26 @@ namespace NeonSiege
             obstacle = gameObject.AddComponent<UnityEngine.AI.NavMeshObstacle>();
             obstacle.shape = UnityEngine.AI.NavMeshObstacleShape.Box; obstacle.size = col.size; obstacle.center = col.center; obstacle.carving = true;
         }
-        Transform holoFrame; LineRenderer beam; int crackStage;
+        Transform holoFrame; LineRenderer beam; int crackStage, layersDone;
         public float MaxHp { get { return Config.CoverHp * (ToonAssets.Available ? 1.3f : 1f); } }
         void Update()
         {
             float age = Time.time - born;
             float k = Mathf.Clamp01(age / deploy);
+            if (Skills.Food)
+            {
+                // V23：威化分 3 层从下往上叠（每层 = 部署时间 / 3，0.6 s 部署 → 每层 0.2 s），每叠一层一声"咔嚓"，最后一层落地加一声低频"咚"
+                int layers = Mathf.Min(3, Mathf.FloorToInt(k * 3f + .0001f));
+                if (age >= deploy) layers = 3;
+                while (layersDone < layers)
+                {
+                    layersDone++;
+                    Sfx.Play("food_wafer_crunch", transform.position + Vector3.up * h * layersDone / 3f, .9f, 1f + layersDone * .05f, 1f, 40f);
+                    Fx.Burst(transform.position + Vector3.up * h * layersDone / 3f, Vector3.up, Skills.Wafer, 8, 1.5f, .05f, .4f, 1f);
+                    if (layersDone == 3) Sfx.Play("food_rice_thud", transform.position, .6f, 1.5f, 1f, 35f);
+                }
+                k = layers / 3f + (layers < 3 ? Mathf.SmoothStep(0, 1, Mathf.Repeat(k * 3f, 1f)) / 3f * .35f : 0f);   // 一层一层"顿"地长高
+            }
             if (age < deploy)
             {
                 if (holoFrame == null)
@@ -631,10 +684,23 @@ namespace NeonSiege
             col.size = new Vector3(w, Mathf.Max(.1f, h * k), thick); col.center = new Vector3(0, col.size.y / 2, 0);
             if (age > deploy + life) Destroy(gameObject);
         }
+        void Cracks(int stage)
+        {
+            var dark = Arena.Glow(new Color(.45f, .3f, .15f), 0f);
+            for (int i = 0; i < 3 * stage; i++)
+            {
+                var c = GameObject.CreatePrimitive(PrimitiveType.Cube); Destroy(c.GetComponent<Collider>()); c.name = "威化裂缝";
+                c.transform.SetParent(transform, false);
+                float side = i % 2 == 0 ? 1f : -1f;
+                c.transform.localPosition = new Vector3(Random.Range(-w * .4f, w * .4f), Random.Range(.25f, h - .2f), side * (thick / 2 + .006f));
+                c.transform.localRotation = Quaternion.Euler(0, 0, Random.Range(-60f, 60f)); c.transform.localScale = new Vector3(Random.Range(.25f, .55f), .025f, .01f);
+                var r = c.GetComponent<Renderer>(); r.sharedMaterial = dark; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
+        }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
         {
             hp -= amount; if (source == null || source.team != owner.team) absorbed += amount;
-            if (!counted && absorbed >= 60) { counted = true; owner.stats.skillEffective++; }
+            if (!counted && absorbed >= 60) { counted = true; owner.stats.skillEffective++; if (Skills.Food) SkillPop.Show(owner, "威化挡住了！", Skills.Wafer); }
             if (Skills.Food && hp > 0)
             {
                 // 耐久掉到 2/3、1/3 时掉饼干渣、颜色变暗（裂纹感）
@@ -644,13 +710,15 @@ namespace NeonSiege
                     crackStage = stage;
                     Fx.Burst(transform.position + Vector3.up * .9f, Vector3.up, Skills.Wafer, 24, 3, .07f, .6f, 1.2f);
                     foreach (var r in visual.GetComponentsInChildren<Renderer>()) if (r.gameObject != visual.gameObject && r.material.HasProperty("_Color") && r.name != "Cube") r.material.color *= .82f;
+                    Cracks(stage);   // V23：2/3、1/3 出现真的裂缝
                 }
-                if (Random.value < .35f) Sfx.Play("food_popcorn", transform.position + Vector3.up, .35f, 1.5f, 1f, 20f);   // 脆响
+                Sfx.Play("food_wafer_crunch", transform.position + Vector3.up, .35f, 1.4f + Random.value * .2f, 1f, 20f);   // V23：被打的小脆响
+                Fx.Burst(transform.position + Vector3.up * Random.Range(.4f, h), Vector3.up, Skills.Wafer, 3, 2f, .04f, .4f, 1.2f);
             }
             if (hp <= 0)
             {
                 Fx.Burst(transform.position + Vector3.up * .8f, Vector3.up, Skills.Food ? Skills.Wafer : new Color(.6f, .8f, 1f), 30, 5, .12f, .7f, 1);
-                if (Skills.Food) Sfx.Play("food_popcorn", transform.position, 1f, .7f, 1f, 40f);
+                if (Skills.Food) { Sfx.Play("food_wafer_shatter", transform.position, 1f, 1f, 1f, 40f); Fx.Debris(transform.position + Vector3.up * h * .5f, Skills.Wafer, 14); }   // V23：整面墙"哗啦"散成饼干块
                 else Sfx.Play("impactMetal", transform.position, .9f, .8f);
                 if (source != null && source.team != owner.team) source.stats.coverDestroyed++;
                 Destroy(gameObject);
@@ -664,7 +732,14 @@ namespace NeonSiege
         public Fighter owner; float hp = Config.ShieldHp, absorbed, born; bool counted; Material mat;
         Transform jiggle; Vector3 jiggleBase; float jt = 9f;
         // V22 第三期：果冻门帘 —— 嵌进门框，不跟人走（铁幕可以离开）；承伤 ×ShieldDockHpMult、持续 ShieldDockLife；双方子弹手雷都挡，人能慢慢穿过（×ShieldDockPassSlow）
-        public bool docked; public Object dockKey; float w = Config.ShieldWidth, hgt = Config.ShieldHeight, life = Config.ShieldLife, hpMax = Config.ShieldHp; float wobbleAt;
+        public bool docked; public Object dockKey; float w = Config.ShieldWidth, hgt = Config.ShieldHeight, life = Config.ShieldLife, hpMax = Config.ShieldHp; float wobbleAt, dripAt;
+        // V23：布丁"啵"地立起 —— 0 → 0.1 s 从 60% 涨到 110%，0.1 → 0.3 s 回落到 100%
+        public static float PopCurve(float age)
+        {
+            if (age >= .3f) return 1f;
+            if (age < .1f) return Mathf.Lerp(.6f, 1.1f, age / .1f);
+            return Mathf.Lerp(1.1f, 1f, Mathf.SmoothStep(0, 1, (age - .1f) / .2f));
+        }
         public static readonly List<ShieldWall> Docked = new List<ShieldWall>();
         public float Hp { get { return hp; } }
         public float HpMax { get { return hpMax; } }
@@ -744,7 +819,14 @@ namespace NeonSiege
         {
             float age = Time.time - born;
             mat.SetColor("_Color", Tint * (1.1f + .3f * Mathf.Sin(Time.time * 10f)) * Mathf.Clamp01(hp / hpMax * .7f + .3f));   // 血越少越淡（布丁化开）
-            if (jiggle != null) { jt += Time.deltaTime; float jw = Mathf.Exp(-jt * 6f) * Mathf.Sin(jt * 28f); jiggle.localScale = new Vector3(jiggleBase.x * (1 + .03f * jw), jiggleBase.y * (1 - .05f * jw), jiggleBase.z); }
+            if (jiggle != null)
+            {
+                jt += Time.deltaTime; float jw = Mathf.Exp(-jt * 6f) * Mathf.Sin(jt * 28f);
+                float pop = PopCurve(age);   // V23：0.3 s 的弹性出场（盾第 1 帧就生效，只是形状在弹）
+                jiggle.localScale = new Vector3(jiggleBase.x * (1 + .03f * jw) * (2f - pop) * .5f + jiggleBase.x * .5f, jiggleBase.y * (1 - .05f * jw) * pop, jiggleBase.z);
+                jiggle.localPosition = new Vector3(0, jiggle.localScale.y / 2f, 0);
+                if (hp < hpMax * .5f && Time.time >= dripAt) { dripAt = Time.time + Mathf.Lerp(.15f, .5f, hp / (hpMax * .5f)); Fx.Burst(transform.position + transform.right * Random.Range(-w * .45f, w * .45f) + Vector3.up * .15f, Vector3.down, new Color(.75f, .45f, .12f), 2, .5f, .07f, .6f, 1.5f); }   // 血量 < 50%：底部滴焦糖
+            }
             if (age > life || !docked && !owner.alive) { if (!docked) owner.shieldActiveUntil = 0; Destroy(gameObject); }
         }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
@@ -753,13 +835,25 @@ namespace NeonSiege
             hp -= amount; absorbed += amount;
             mat.SetColor("_Color", Color.white * 3f);
             if (source != null) { mat.SetVector("_HitPos", transform.position + Vector3.up * 1.4f + (source.transform.position - transform.position).normalized * .1f); mat.SetFloat("_HitTime", Time.timeSinceLevelLoad); }
-            if (Skills.Food) { jt = 0; Sfx.Play("food_squish", transform.position + Vector3.up, .4f, 1.6f, 1f, 30f); }   // 软软的噗噗声 + 果冻抖
+            if (Skills.Food)
+            {
+                // V23：软"噗"，血越少音高越低（听得出盾快化了）；被打处一圈凹坑波纹
+                jt = 0; Sfx.Play("food_squish", transform.position + Vector3.up, .4f, Mathf.Lerp(.8f, 1.6f, Mathf.Clamp01(hp / hpMax)), 1f, 30f);
+                if (source != null) { Vector3 hitAt = transform.position + Vector3.up * 1.2f + (source.transform.position - transform.position).normalized * .1f; Fx.Burst(hitAt, (source.transform.position - transform.position).normalized, Skills.Caramel, 5, 1.2f, .06f, .3f, .3f); }
+                if (absorbed >= 60) SkillPop.Show(owner, "布丁吃下 " + Mathf.RoundToInt(absorbed) + " 伤害", Skills.Caramel);
+            }
             else Sfx.Play("impactMetal_light", transform.position + Vector3.up, .5f, 1.8f, 1f, 30f);
             if (!counted && absorbed >= 60) { counted = true; owner.stats.skillEffective++; }
             if (hp <= 0)
             {
                 Fx.Burst(transform.position + Vector3.up * 1.2f, transform.forward, Tint, 40, 5, .1f, .6f, 0);
-                if (Skills.Food) Sfx.Play("food_splat", transform.position, 1f, .7f); else Sfx.Play("forceField", transform.position, 1f, .5f);
+                if (Skills.Food)
+                {
+                    Sfx.Play("food_splat", transform.position, 1f, .7f);   // 湿的"啪叽"
+                    var puddle = FoodFx.Splat(Skills.GroundAt(transform.position) + Vector3.up * .02f, Vector3.up, Skills.Caramel, Mathf.Max(1.6f, w * .9f));   // 瘫成一滩布丁，留 1.8 s
+                    if (puddle != null) Destroy(puddle, 1.8f);
+                }
+                else Sfx.Play("forceField", transform.position, 1f, .5f);
                 if (!docked) owner.shieldActiveUntil = 0;
                 Destroy(gameObject);
             }
@@ -821,7 +915,7 @@ namespace NeonSiege
                 Vector3 n = hitSomething ? hit.normal : Vector3.up;
                 Vector3 p = hitSomething ? hit.point - transform.forward * .12f + n * .02f : transform.position;   // tip buried in the surface
                 transform.position = p;
-                if (Skills.Food) { Fx.Burst(p, n, Skills.Mustard, 10, 2f, .05f, .4f, .5f); Sfx.Play("food_bonk", p, .7f, 1.4f, 1f, 30f); }   // 竹签扎进去
+                if (Skills.Food) { Fx.Burst(p, n, Skills.Mustard, 14, 2.4f, .06f, .4f, .5f); Sfx.Play("food_bamboo_thunk", p, .8f, 1f, 1f, 30f); gameObject.AddComponent<Quiver>(); }   // V23：竹签扎木头 + 溅一小团芥末 + 签尾抖 3 下
                 else { Fx.Sparks(p, n, new Color(.7f, .6f, 1f), 10); Sfx.Play("impactMetal", p, .7f, 1.6f, 1f, 30f); }
                 var d = gameObject.AddComponent<Drone>();
                 var pot = hitSomething ? Links.PotAt(p) : null;   // V22 第三期：签子扎进火锅 / 关东煮锅 → 芥末辣锅（同一口锅同时只有一个）
@@ -866,7 +960,7 @@ namespace NeonSiege
         void PotUpdate(float age)
         {
             if (age >= Config.MustardPotLife || owner == null) { Destroy(gameObject); return; }
-            if (SteamCloud.Suppressed) { if (Match.I != null) Match.I.Feed("冰淇淋吹散了热气 · 芥末辣锅一起散了", new Color(.7f, .95f, 1f)); Destroy(gameObject); return; }   // 反制：冰淇淋形态打火锅
+            if (SteamCloud.SuppressedAt(pot.transform.position)) { if (Match.I != null) Match.I.Feed("冰淇淋吹散了热气 · 芥末辣锅一起散了", new Color(.7f, .95f, 1f)); Destroy(gameObject); return; }   // 反制：冰淇淋形态打火锅
             if (Time.time < potTick) return;
             potTick = Time.time + .2f;
             Vector3 c = pot.transform.position;
@@ -896,7 +990,7 @@ namespace NeonSiege
             if (pulse != null)
             {
                 float k = Mathf.Clamp01((age - Config.DroneScanDelay) / .5f);
-                Skills.Circle(pulse, transform.position, Config.DroneRadius * k);
+                if (Skills.Food) Skills.WavyCircle(pulse, transform.position, Config.DroneRadius * k, age); else Skills.Circle(pulse, transform.position, Config.DroneRadius * k);   // V23：芥末味的波浪烟环
                 var c = pulse.startColor; c.a = 1 - k * .7f; pulse.startColor = pulse.endColor = c;
             }
             if (age >= Config.DroneLife) Destroy(gameObject);
@@ -904,8 +998,8 @@ namespace NeonSiege
         void Scan()
         {
             scanned = true; int found = 0;
-            Sfx.Play("maximize", transform.position, 1f, .8f, 1f, 45f);
-            if (Skills.Food) Sfx.Play("food_squish", transform.position, .9f, 1.7f, 1f, 45f);   // 芥末"呛"出来：吸鼻子 + 喷嚏
+            if (Skills.Food) Sfx.Play("food_sneeze", transform.position, 1f, 1f, 1f, 45f);   // V23：吸鼻子 → 啊嚏！（45 m 不变）
+            else Sfx.Play("maximize", transform.position, 1f, .8f, 1f, 45f);
             var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere); Destroy(sphere.GetComponent<Collider>());
             sphere.name = Skills.Food ? "芥末气味波" : "扫描球"; sphere.transform.position = transform.position;
             var sm = new Material(Resources.Load<Material>("Materials/Holo") ?? Fx.Additive); sm.SetColor("_Color", ScanColor * 1.2f);
@@ -919,12 +1013,18 @@ namespace NeonSiege
             {
                 if (!e.alive || e.team == owner.team) continue;
                 if (Vector3.Distance(e.Chest, transform.position) > Config.DroneRadius) continue;
-                if (!Skills.LineClear(transform.position + normal * .3f, e.Chest, e)) continue;
+                if (!Skills.SightClear(transform.position + normal * .3f, e.Chest, e)) continue;
                 if (Time.time < e.hiddenFromScanUntil) { NoiseField.CreditBlock(e); continue; }
                 e.revealedUntil = Time.time + Config.DroneRevealTime; found++;
-                if (Skills.Food) Fx.Burst(e.Chest + Vector3.up * .9f, Vector3.up, Skills.Mustard, 12, 2f, .06f, .5f, -.2f);   // 被呛到
+                if (Skills.Food)
+                {
+                    Fx.Burst(e.Chest + Vector3.up * .9f, Vector3.up, Skills.Mustard, 12, 2f, .06f, .5f, -.2f);   // 被呛到
+                    Fx.Burst(e.Eye, Vector3.down, new Color(.6f, .85f, 1f), 6, 1f, .04f, .5f, 1.2f);            // 小眼泪
+                    SkillPop.World(e.Eye + Vector3.up * .7f, "呛！", Skills.Mustard, e.transform);
+                }
                 if (e.human) FoodTips.Trigger("enemy_mustard");
             }
+            if (found > 0 && Skills.Food) SkillPop.Show(owner, "呛到 " + found + " 人！", Skills.Mustard);
             if (found > 0) { owner.stats.skillEffective++; Match.I.Feed(Skills.Food ? Config.TeamName(owner.team) + " 夜鸦 的芥末签呛到了 " + found + " 名敌人" : Config.TeamName(owner.team) + " 夜鸦 扫描到 " + found + " 名敌人"); }
         }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
@@ -935,6 +1035,19 @@ namespace NeonSiege
             if (Match.I != null) Match.I.Feed(pot != null ? "芥末签被打断了 · 芥末辣锅散了" : Skills.Food ? "芥末签被打断了" : "侦测箭信标被击毁");
             Destroy(gameObject);
             return true;
+        }
+    }
+
+    // V23：签子钉入后尾部抖 3 下（0.36 s）
+    public class Quiver : MonoBehaviour
+    {
+        float t; Quaternion baseRot;
+        void Start() { baseRot = transform.rotation; }
+        void Update()
+        {
+            t += Time.deltaTime; float k = t / .36f;
+            if (k >= 1f) { transform.rotation = baseRot; Destroy(this); return; }
+            transform.rotation = baseRot * Quaternion.Euler(Mathf.Sin(k * Mathf.PI * 6f) * 9f * (1 - k), 0, 0);
         }
     }
 
@@ -983,13 +1096,26 @@ namespace NeonSiege
         {
             float age = Time.time - armed;
             // 引信"滋—滋—"：节奏 0.15 s、可听距离 35 m 与原蜂鸣相同
-            if (Time.time >= nextBeep) { nextBeep = Time.time + .15f; Sfx.Play(Skills.Food ? "food_fizz" : "error", transform.position, 1f, Skills.Food ? 1.8f : 1.6f, 1f, 35f); }
+            if (Time.time >= nextBeep) { nextBeep = Time.time + .15f; Sfx.Play(Skills.Food ? "food_fuse" : "error", transform.position, 1f, Skills.Food ? 1f : 1.6f, 1f, 35f); }   // V23：新合成引信"滋—"，节奏 0.15 s / 35 m 不变
+            if (Skills.Food) Burn(age / Config.BlastWarning);
             bool on = Mathf.Repeat(age * 7f, 1f) < .5f;
             lamp.intensity = on ? 5 : .5f; ring.enabled = on || age > .6f;
             float fk = Mathf.Clamp01(age / Config.BlastWarning) * Config.BlastRadius * 2;
             fill.transform.localScale = new Vector3(fk, .005f, fk);
             if (age >= Config.BlastWarning) Explode();
         }
+        Transform candle, flame; Vector3 candleS, candleP, flameP;
+        // V23：蜡烛长度 = 剩余引信时间（0.9 s 烧完）
+        void Burn(float k)
+        {
+            if (candle == null) { foreach (var t in GetComponentsInChildren<Transform>()) { if (t.name == "蜡烛") candle = t; if (t.name == "火苗") flame = t; } if (candle == null) return; candleS = candle.localScale; candleP = candle.localPosition; if (flame != null) flameP = flame.localPosition; }
+            float left = Mathf.Clamp01(1f - k) * .85f + .15f;
+            candle.localScale = new Vector3(candleS.x, candleS.y * left, candleS.z);
+            candle.localPosition = candleP - new Vector3(0, candleS.y * (1 - left), 0);
+            if (flame != null) { flame.localPosition = flameP - new Vector3(0, candleS.y * 2f * (1 - left), 0); flame.localScale = Vector3.one * .045f * (1f + .25f * Mathf.Sin(Time.time * 40f)); }
+            if (Random.value < .4f && flame != null) Fx.Burst(flame.position, Vector3.up, new Color(1f, .7f, .25f), 1, .8f, .02f, .25f, -.2f);
+        }
+        public static string LastResult = "";
         void Explode()
         {
             Vector3 p = transform.position;
@@ -1001,26 +1127,35 @@ namespace NeonSiege
                 for (int i = 0; i < 6; i++) Fx.Burst(p + Vector3.up * .4f, Vector3.up, FoodFx.Confetti[i], 16, 7f, .08f, 1f, .8f);
                 Fx.Burst(p + Vector3.up * .3f, Vector3.up, new Color(1f, .97f, .92f), 24, 5f, .12f, .7f, 1f);
                 Sfx.Play("food_confetti", p, 1f, .9f, 1f, 50f);
+                // V23：一圈奶油冲击波（白环）+ 奶油"噗" + 地面 / 墙面奶油贴花（≈ 6 s）
+                Fx.Shockwave(p, Config.BlastRadius, new Color(1f, .97f, .92f), .5f);
+                Sfx.Play("food_cream", p, 1f, .8f, 1f, 50f);
+                for (int i = 0; i < 8; i++)
+                {
+                    Vector3 dir = Quaternion.Euler(0, i * 45f, 0) * Vector3.forward + Vector3.down * .35f;
+                    if (Physics.Raycast(p + Vector3.up * .3f, dir, out RaycastHit ch, Config.BlastRadius, ~0, QueryTriggerInteraction.Ignore) && ch.collider.GetComponentInParent<Fighter>() == null)
+                    { var q = FoodFx.Splat(ch.point, ch.normal, new Color(1f, .97f, .92f), Random.Range(.5f, .9f)); if (q != null) Destroy(q, 6f); }
+                }
             }
-            bool effective = false;
+            bool effective = false, hitPerson = false, hitCover = false;
             foreach (var e in Match.I.fighters)
             {
                 if (!e.alive || e.team == owner.team) continue;
                 float d = Vector3.Distance(e.Chest, p);
-                if (d > Config.BlastRadius || !Skills.LineClear(p + Vector3.up * .2f, e.Chest, e)) continue;
+                if (d > Config.BlastRadius || !Skills.BlastClear(p + Vector3.up * .2f, e.Chest, e)) continue;   // V23：爆炸只看实体几何，蒸汽挡不住
                 float dmg = Config.BlastMaxDamage * Mathf.Lerp(1f, .45f, d / Config.BlastRadius);
-                DamageCtx.Set(DamageKind.Skill, owner.Hero.skill.Name); e.ReceiveDamage(dmg, owner, p, false, true); effective = true;
+                DamageCtx.Set(DamageKind.Skill, owner.Hero.skill.Name); e.ReceiveDamage(dmg, owner, p, false, true); effective = true; hitPerson = true;
             }
             foreach (var c in Physics.OverlapSphere(p, Config.BlastRadius))
             {
                 var piece = c.GetComponent<WallPiece>();
-                if (piece != null) { if (Vector3.Distance(c.transform.position, p) < 2.3f) { piece.TakeDamage(999, owner, true); effective = true; } continue; }
+                if (piece != null) { if (Vector3.Distance(c.transform.position, p) < 2.3f) { piece.TakeDamage(999, owner, true); effective = true; hitCover = true; } continue; }
                 var dest = c.GetComponentInParent<Destructible>();
-                if (dest != null && dest.Alive) { dest.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; continue; }
+                if (dest != null && dest.Alive) { dest.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; continue; }
                 var cover = c.GetComponentInParent<DeployedCover>();
-                if (cover != null && cover.owner.team != owner.team) { cover.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; continue; }
+                if (cover != null && cover.owner.team != owner.team) { cover.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; continue; }
                 var shield = c.GetComponentInParent<ShieldWall>();
-                if (shield != null && shield.owner.team != owner.team) { shield.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; }
+                if (shield != null && shield.owner.team != owner.team) { shield.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; }
             }
             if (stuck != null && stuck.wall != null && !hadHole)
             {
@@ -1037,6 +1172,7 @@ namespace NeonSiege
                 if (!hadHole && hole != null) Links.Trigger(LinkKind.CakeBreach, owner, hole.center + Vector3.up * 1.2f, "蛋糕墙炸出一个能过人的洞（" + hole.width.ToString("0.0") + " m 宽）");
             }
             if (effective) owner.stats.skillEffective++;
+            if (Skills.Food && (hitPerson || hitCover)) { LastResult = hitPerson ? "生日快乐！" : "烤酥了！"; SkillPop.Show(owner, LastResult, hitPerson ? new Color(1f, .5f, .65f) : Skills.Caramel); }   // V23：命中人 / 命中掩体
             var fire = new GameObject(Skills.Food ? "焦糖火" : "燃烧区"); fire.transform.position = Skills.GroundAt(p);
             fire.AddComponent<FireZone>().owner = owner; Skills.spawned.Add(fire);
             Destroy(gameObject);
@@ -1046,7 +1182,7 @@ namespace NeonSiege
     // 焚芯爆破后的燃烧区：持续伤害敌人，迫使其离开点位
     public class FireZone : MonoBehaviour
     {
-        public Fighter owner; float born, tick; Light l;
+        public Fighter owner; float born, tick, bubbleAt; Light l; readonly List<Transform> bubbles = new List<Transform>();
         void Start()
         {
             born = Time.time;
@@ -1059,18 +1195,34 @@ namespace NeonSiege
             var col = ps.colorOverLifetime; col.enabled = true;
             var g = new Gradient(); g.SetKeys(new[] { new GradientColorKey(new Color(1f, .9f, .5f), 0), new GradientColorKey(new Color(1f, .2f, .05f), 1) }, new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(0, 1) }); col.color = g;
             go.GetComponent<ParticleSystemRenderer>().material = Fx.Additive;
+            if (Skills.Food)
+            {
+                // V23：焦糖地面 —— 琥珀色、表面鼓泡、边缘结焦（不再是通用橙色地面火）
+                main.startColor = new ParticleSystem.MinMaxGradient(new Color(1f, .7f, .25f), new Color(.85f, .45f, .1f)); main.startSize = new ParticleSystem.MinMaxCurve(.15f, .45f);
+                main.startSpeed = new ParticleSystem.MinMaxCurve(.2f, .7f); em.rateOverTime = 70;
+                g.SetKeys(new[] { new GradientColorKey(new Color(1f, .8f, .35f), 0), new GradientColorKey(new Color(.6f, .3f, .05f), 1) }, new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(0, 1) }); col.color = g;
+                var disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Destroy(disc.GetComponent<Collider>()); disc.name = "焦糖地面";
+                disc.transform.SetParent(transform, false); disc.transform.localPosition = Vector3.up * .03f; disc.transform.localScale = new Vector3(Config.FireRadius * 2, .01f, Config.FireRadius * 2);
+                var dm = new Material(Shader.Find("Sprites/Default")) { color = new Color(.85f, .5f, .12f, .55f) }; disc.GetComponent<Renderer>().sharedMaterial = dm; disc.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                var edge = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Destroy(edge.GetComponent<Collider>()); edge.name = "焦边";
+                edge.transform.SetParent(transform, false); edge.transform.localPosition = Vector3.up * .02f; edge.transform.localScale = new Vector3(Config.FireRadius * 2.12f, .008f, Config.FireRadius * 2.12f);
+                edge.GetComponent<Renderer>().sharedMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(.3f, .15f, .05f, .7f) };
+                for (int i = 0; i < 9; i++) { var b = GameObject.CreatePrimitive(PrimitiveType.Sphere); Destroy(b.GetComponent<Collider>()); b.name = "焦糖泡"; b.transform.SetParent(transform, false); Vector2 rp = Random.insideUnitCircle * Config.FireRadius * .8f; b.transform.localPosition = new Vector3(rp.x, .04f, rp.y); b.transform.localScale = Vector3.zero; b.GetComponent<Renderer>().sharedMaterial = Arena.Glow(new Color(1f, .72f, .3f), .8f); bubbles.Add(b.transform); }
+            }
             l = new GameObject("火光").AddComponent<Light>(); l.transform.SetParent(transform, false); l.transform.localPosition = Vector3.up;
             l.color = new Color(1f, .5f, .15f); l.range = 9; l.intensity = 3;
             var ring = new GameObject("燃烧边界").AddComponent<LineRenderer>(); ring.transform.SetParent(transform);
-            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .08f; ring.startColor = ring.endColor = new Color(1f, .4f, .1f);
+            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .08f; ring.startColor = ring.endColor = Skills.Food ? new Color(1f, .65f, .2f) : new Color(1f, .4f, .1f);
             Skills.Circle(ring, transform.position, Config.FireRadius);
-            Sfx.Play(Skills.Food ? "food_fizz" : "thrusterFire", transform.position, .8f, Skills.Food ? .5f : .6f, 1f, 35f);
+            Sfx.Play(Skills.Food ? "food_caramel_bubble" : "thrusterFire", transform.position, .8f, Skills.Food ? 1f : .6f, 1f, 35f);
         }
         void Update()
         {
             float age = Time.time - born;
             l.intensity = 2.5f + Mathf.PerlinNoise(Time.time * 8, 0) * 1.5f;
             if (age > Config.FireDuration) { Destroy(gameObject); return; }
+            for (int i = 0; i < bubbles.Count; i++) { float bk = Mathf.Repeat(Time.time * .9f + i * .37f, 1f); bubbles[i].localScale = Vector3.one * (bk < .85f ? bk * .35f : 0f); }   // 鼓泡 → 啵地破
+            if (Skills.Food && Time.time >= bubbleAt) { bubbleAt = Time.time + .6f; Sfx.Play("food_caramel_bubble", transform.position, .55f, Random.Range(.9f, 1.1f), 1f, 20f); }   // 咕嘟咕嘟（20 m）
             if (Time.time < tick) return;
             tick = Time.time + .25f;
             foreach (var f in Match.I.fighters)
@@ -1085,7 +1237,7 @@ namespace NeonSiege
     // 幻频 · 信号噪幕：区域内我方不可被侦测；区域内敌方小地图失效；不影响移动、开火、脚步
     public class NoiseField : MonoBehaviour
     {
-        public Fighter owner; float born; Material mat; bool counted; float jamTime;
+        public Fighter owner; float born; Material mat; bool counted; float jamTime, popAt; Transform dome; Vector3 domeScale;
         public readonly HashSet<Object> candyDone = new HashSet<Object>(); float candyAt;   // V22 第三期：本团迷雾已经和哪些蒸汽源做过棉花糖蒸汽
         public float EndsAt { get { return born + Config.NoiseLife; } }
         static readonly Dictionary<Fighter, Fighter> protector = new Dictionary<Fighter, Fighter>();
@@ -1107,6 +1259,7 @@ namespace NeonSiege
             Destroy(dome.GetComponent<Collider>());
             dome.name = Skills.Food ? "棉花糖云" : "噪幕穹顶"; dome.transform.SetParent(transform, false);
             dome.transform.localScale = new Vector3(Config.NoiseRadius * 2, Config.NoiseRadius * .9f, Config.NoiseRadius * 2);
+            this.dome = dome.transform; domeScale = dome.transform.localScale; popAt = Time.time + .3f;
             // 半透明材质不变（不挡视线是规则的一部分），只换成粉紫色棉花糖
             mat = new Material(Resources.Load<Material>("Materials/Holo") ?? Fx.Additive);
             mat.SetColor("_Color", Base * .6f);
@@ -1128,7 +1281,7 @@ namespace NeonSiege
         }
         public static void CreditBlock(Fighter hidden)
         {
-            if (protector.TryGetValue(hidden, out var p) && p != null) { p.stats.skillEffective++; protector.Remove(hidden); }
+            if (protector.TryGetValue(hidden, out var p) && p != null) { p.stats.skillEffective++; protector.Remove(hidden); if (Skills.Food) SkillPop.Show(p, "糊住了！", Skills.Marsh); }
         }
         void Update()
         {
@@ -1140,13 +1293,15 @@ namespace NeonSiege
                 if (!f.alive) continue;
                 if (new Vector2(f.transform.position.x - transform.position.x, f.transform.position.z - transform.position.z).magnitude > Config.NoiseRadius) continue;
                 if (f.team == owner.team) { f.hiddenFromScanUntil = Time.time + .15f; if (f.revealedUntil > Time.time) { f.revealedUntil = 0; CreditOnce(); } protector[f] = owner; }
-                else { f.jammedUntil = Time.time + .15f; anyJammed = true; if (f.human) FoodTips.Trigger("enemy_marsh"); }
+                else { f.jammedUntil = Time.time + .15f; anyJammed = true; if (f.human) { FoodTips.Trigger("enemy_marsh"); if (Skills.Food) SkillPop.EdgeSugar = 1f; } }   // V23：雾里敌人屏幕四角糊一层糖丝
             }
             if (anyJammed) { jamTime += Time.deltaTime; if (jamTime >= 1f) CreditOnce(); }
             if (Time.time >= candyAt) { candyAt = Time.time + .25f; Links.CandyCheck(this); }   // V22 第三期：迷雾 ∩ 蒸汽源 → 棉花糖蒸汽
             if (Random.value < .3f) Fx.Burst(transform.position + new Vector3(Random.Range(-5f, 5f), Random.Range(.3f, 2.5f), Random.Range(-5f, 5f)), Vector3.up, Skills.Food ? FoodFx.Confetti[Random.Range(0, 6)] : new Color(.8f, .4f, 1f), 3, 1, .06f, .25f, 0);   // 飘糖粒
+            if (Skills.Food && Time.time >= popAt) { popAt = Time.time + .7f; Sfx.Play("food_poprock_loop", transform.position, .45f, Random.Range(.95f, 1.05f), 1f, 45f); }   // V23：跳跳糖噼啪循环（45 m）
+            if (Skills.Food && age < .35f && dome != null) dome.localScale = domeScale * (.4f + .6f * Mathf.Sin(Mathf.Clamp01(age / .35f) * Mathf.PI * .5f) + .12f * Mathf.Sin(age / .35f * Mathf.PI));   // "噗"地膨出
             if (age >= Config.NoiseLife) Destroy(gameObject);
         }
-        void CreditOnce() { if (!counted) { counted = true; owner.stats.skillEffective++; } }
+        void CreditOnce() { if (!counted) { counted = true; owner.stats.skillEffective++; if (Skills.Food) SkillPop.Show(owner, "糊住了！", Skills.Marsh); } }
     }
 }

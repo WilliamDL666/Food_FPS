@@ -33,6 +33,7 @@ namespace NeonSiege
             StartCoroutine(Portraits.Build());
             if (Camera.main != null && Camera.main.GetComponent<XRayOverlay>() == null) Camera.main.gameObject.AddComponent<XRayOverlay>();
             if (Camera.main != null && ToonAssets.Available && Camera.main.GetComponent<ToonOutline>() == null) Camera.main.gameObject.AddComponent<ToonOutline>();
+            MapUI.Ensure(); IngredientGuide.Ensure();   // V23 b：地图底图 + 食材指引
         }
 
         static Texture2D MakeVignette(int n)
@@ -120,6 +121,7 @@ namespace NeonSiege
         // Main-menu background: a slow flyover of the live map with the HUD hidden.
         public int preview;   // screenshot harness: 1 main menu, 2 settings
         public void PreviewPause(bool on) { overlay = on ? Overlay.Pause : Overlay.None; }
+        public void OpenMap(bool on) { overlay = on ? Overlay.Map : Overlay.None; }   // V23 b：截图 / 测试打开 M 大地图
         void LateUpdate()
         {
             if (preview != 1 && (started || game.autoplay || game.testMode)) return;
@@ -153,7 +155,7 @@ namespace NeonSiege
             else if (Input.GetKeyDown(KeyCode.H) && overlay == Overlay.Help && returnTo == Overlay.None) Close();
             if (Input.GetKeyDown(KeyCode.B) && game.phase == Phase.Prep && started)
             { if (overlay == Overlay.Buy) Close(); else { overlay = Overlay.Buy; ShowCursor(true); } }
-            if (Input.GetKeyDown(KeyCode.M) && (overlay == Overlay.None || overlay == Overlay.Map)) overlay = overlay == Overlay.Map ? Overlay.None : Overlay.Map;
+            if (Input.GetKeyDown(KeyCode.M) && (overlay == Overlay.None || overlay == Overlay.Map)) { overlay = overlay == Overlay.Map ? Overlay.None : Overlay.Map; if (!game.testMode && !game.autoplay) ShowCursor(overlay == Overlay.Map); }   // V23 b：大地图里能点图层按钮
             if (overlay == Overlay.None && Input.GetKey(KeyCode.Tab)) overlay = Overlay.Scoreboard;
             else if (overlay == Overlay.Scoreboard && !Input.GetKey(KeyCode.Tab)) overlay = Overlay.None;
             if (game.player != null && overlay == Overlay.None && Cursor.lockState != CursorLockMode.Locked && Input.GetMouseButtonDown(0)) ShowCursor(false);
@@ -268,13 +270,13 @@ namespace NeonSiege
             TopBar(W);
             if (p != null)
             {
-                Minimap(new Rect(16, 16, 270, 190));
-                if (zone >= 0)
+                Minimap(new Rect(16, 16, MiniSize, MiniSize));   // V23 b：圆形局部小地图
                 {
-                    var zn = Arena.Zones[zone];
-                    Round(new Rect(16, 212, 270, 26), new Color(.03f, .05f, .09f, .8f), 8);
-                    Round(new Rect(16, 212, 5, 26), zn.color, 2);
-                    Text(new Rect(28, 212, 260, 26), "当前位置 · " + zn.name, With(small, 14, TextAnchor.MiddleLeft), zn.color);
+                    bool food = ToonAssets.Available; var zc = zone >= 0 ? Arena.Zones[zone].color : new Color(.8f, .8f, .85f);
+                    Round(new Rect(16, 22 + MiniSize, MiniSize, 26), food ? new Color(.25f, .08f, .2f, .82f) : new Color(.03f, .05f, .09f, .8f), 8);
+                    Round(new Rect(16, 22 + MiniSize, 5, 26), zc, 2);
+                    Text(new Rect(28, 22 + MiniSize, MiniSize - 70, 26), zone >= 0 ? "当前位置 · " + MapUI.ZoneDisplayName(zone) : MapUI.MapTitle, With(small, 14, TextAnchor.MiddleLeft), Color.Lerp(zc, Color.white, .35f));
+                    Text(new Rect(16 + MiniSize - 64, 22 + MiniSize, 58, 26), "M 大地图", With(tiny, 11, TextAnchor.MiddleRight), new Color(.85f, .8f, .85f));
                 }
                 ZonePopup(W);
                 if (p.alive) { Crosshair(W, H, p); if (GameSettings.DamageNumbers) DamageNumbers(s, p); DamageIndicators(W, H, p); Prompts(W, H, p); }
@@ -293,7 +295,7 @@ namespace NeonSiege
                 case Overlay.HeroSelect: HeroSelect(W, H); break;
                 case Overlay.Buy: BuyMenu(W, H); break;
                 case Overlay.Scoreboard: Scoreboard(W, H, false); break;
-                case Overlay.Map: if (p != null) { Fill(new Rect(0, 0, W, H), new Color(0, 0, 0, .55f)); float mh = H - 120, mw = mh * (Arena.HalfX / Arena.HalfZ); Minimap(new Rect(W / 2 - mw / 2 - 120, 60, mw, mh), true); MapLegend(new Rect(W / 2 + mw / 2 - 100, 60, 230, mh)); } break;
+                case Overlay.Map: if (p != null) BigMap(W, H, p); break;   // V23 b
             }
             if (game.phase == Phase.MatchEnd) MatchEnd(W, H);
         }
@@ -431,126 +433,52 @@ namespace NeonSiege
             }
         }
 
-        void Minimap(Rect r, bool big = false)
-        {
-            PanelBox(r, 12);
-            var p = game.player;
-            Rect inner = new Rect(r.x + 8, r.y + 8, r.width - 16, r.height - 30);
-            if (p.alive && Time.time < p.jammedUntil)
-            {
-                for (int i = 0; i < 96 * 54; i++) { float v = Random.value; noise.SetPixel(i % 96, i / 96, new Color(v * .6f, v * .3f, v * .8f, 1)); }
-                noise.Apply(); GUI.DrawTexture(inner, noise);
-                // V21：按干扰来源显示
-                string jam = !ToonAssets.Available ? "信号噪幕 · 小地图失效" : NoiseField.Covers(p) ? "棉花糖迷雾 · 小地图被糖糊住了" : "看不清 · 小地图被糊住了";
-                Text(inner, jam, With(centered, 16, TextAnchor.MiddleCenter));
-                return;
-            }
-            Round(inner, new Color(.24f, .28f, .32f, .92f), 6);   // V13：可走区域浅色，楼房深色，一眼看出道路
-            float sx = inner.width / (Arena.HalfX * 2), sz = inner.height / (Arena.HalfZ * 2);
-            System.Func<Vector3, Vector2> map = v => new Vector2(inner.x + (v.x + Arena.HalfX) * sx, inner.y + (Arena.HalfZ - v.z) * sz);
-            foreach (var b in Arena.I.minimapBlocks)
-            {
-                if (Mathf.Abs(b.center.x) > Arena.HalfX + 2 || Mathf.Abs(b.center.y) > Arena.HalfZ + 2) continue;
-                Vector2 a = map(new Vector3(Mathf.Max(b.xMin, -Arena.HalfX), 0, Mathf.Min(b.yMax, Arena.HalfZ)));
-                Vector2 c2 = map(new Vector3(Mathf.Min(b.xMax, Arena.HalfX), 0, Mathf.Max(b.yMin, -Arena.HalfZ)));
-                var br = new Rect(a.x, a.y, Mathf.Max(1, c2.x - a.x), Mathf.Max(1, c2.y - a.y));
-                Fill(new Rect(br.x - 1, br.y - 1, br.width + 2, br.height + 2), new Color(.55f, .62f, .7f, .9f));
-                Fill(br, new Color(.06f, .07f, .09f, .98f));
-            }
-            for (int s = 0; s < 2; s++)
-            {
-                Vector2 c = map(Arena.SiteCenter(s)); float rr = Config.SiteRadius * sx;
-                Color sc = s == 0 ? new Color(1f, .5f, .2f) : new Color(.3f, .8f, 1f);
-                Round(new Rect(c.x - rr, c.y - rr, rr * 2, rr * 2), new Color(sc.r, sc.g, sc.b, .25f), rr);
-                Text(new Rect(c.x - 10, c.y - 10, 20, 20), s == 0 ? "A" : "B", With(centered, 14, TextAnchor.MiddleCenter), sc);
-            }
-            if (big) MapIcons(map, 2.2f, true);
-            else foreach (var sh in Arena.I.shutters) { var a2 = map(sh.transform.position); Fill(new Rect(a2.x - 4, a2.y - 1.5f, 8, 3), sh.open ? new Color(.4f, 1f, .5f) : (sh.gate ? CGate : CShutter)); }
-            foreach (var zn in Arena.Zones)
-            {
-                if (!big) continue;   // V13：小地图不再写区域名（太挤），大地图用大号报点字
-                Vector2 c = map(new Vector3(zn.area.center.x, 0, zn.area.center.y));
-                string nm = zn.name; float tw = nm.Length * 17 + 16;
-                Round(new Rect(c.x - tw / 2, c.y - 13, tw, 26), new Color(0, 0, 0, .62f), 6);
-                Text(new Rect(c.x - tw / 2, c.y - 13, tw, 26), nm, With(normal, 16, TextAnchor.MiddleCenter), Color.Lerp(zn.color, Color.white, .45f));
-            }
-            bool att = p.team == game.AttackingTeam;
-            if (game.Planted || (att && game.bomb == BombState.Dropped)) { Vector2 a = map(game.bombPos); Round(new Rect(a.x - 5, a.y - 5, 10, 10), Mathf.Repeat(Time.time * 3, 1) < .5f ? new Color(1f, .2f, .2f) : new Color(1f, .7f, .3f), 5); }
-            foreach (var f in game.fighters)
-            {
-                if (!f.alive) continue;
-                if (!(f.team == p.team || f.Revealed)) continue;
-                Vector2 a = map(f.transform.position);
-                Color col = f == p ? Color.white : Config.TeamColor(f.team);
-                var m = GUI.matrix;
-                CombatHud.RotP(f.yaw, a);
-                Fill(new Rect(a.x - 1, a.y - 9, 2, 6), col);
-                GUI.matrix = m;
-                Round(new Rect(a.x - 4, a.y - 4, 8, 8), col, 4);
-                if (game.BombCarrier == f && f.team == p.team) Round(new Rect(a.x + 3, a.y - 7, 5, 5), new Color(1f, .4f, .2f), 2);
-            }
-            LinkHud.MapDraw(map, big);   // V22 第三期：自己英雄的联动点（金色星形）+ 队友标记
-            Text(new Rect(r.x + 10, r.yMax - 22, r.width - 20, 18), big ? "霓城 · 旧港夜市街区 · M 关闭地图" : "霓城 · 旧港夜市街区 · M 大地图", tiny);
-        }
-
-        // Interactable icons (minimap + full map). Colours match the in-world neon of each object.
+        // ================================================================ V23 b：地图 UI（底图 / 图标 / 标签在 MapUI.cs，这里只放外框和布局）
+        public const float MiniSize = 240f;
+        // Interactable colours（NearbyLabels 世界标签仍在用）
         static readonly Color CShutter = new Color(1f, .6f, .15f), CPower = new Color(1f, .9f, .2f), CMed = new Color(.3f, 1f, .5f), CPad = new Color(.3f, .9f, 1f),
             CBarrel = new Color(1f, .3f, .2f), CCam = new Color(1f, .2f, .5f), CGlass = new Color(.6f, .85f, 1f), CCover = new Color(1f, .78f, .1f), CDoor = new Color(1f, .5f, .1f),
             CSniper = new Color(.95f, .35f, .35f), CDefend = new Color(.45f, .85f, .55f), CPlant = new Color(1f, .8f, .2f), CGate = new Color(1f, .35f, .2f);
-
-        void Icon(Vector2 a, Color c, float s, string glyph, bool big, bool dim = false)
+        void Minimap(Rect r)
         {
-            if (dim) c = new Color(c.r * .45f, c.g * .45f, c.b * .45f, .8f);
-            float sz = 7 * s;
-            Round(new Rect(a.x - sz / 2, a.y - sz / 2, sz, sz), new Color(0, 0, 0, .7f), sz / 2);
-            Round(new Rect(a.x - sz / 2, a.y - sz / 2, sz, sz), c, sz / 2, Mathf.Max(1, s));
-            if (big && glyph != null) Text(new Rect(a.x - sz, a.y - sz / 2, sz * 2, sz), glyph, With(centered, Mathf.RoundToInt(8 * s), TextAnchor.MiddleCenter), c);
+            var p = game.player;
+            if (p.alive && Time.time < p.jammedUntil)
+            {
+                // V21：按干扰来源显示；V23：雪花换成慢慢流动的棉花糖
+                string jam = !ToonAssets.Available ? "信号噪幕 · 小地图失效" : NoiseField.Covers(p) ? "棉花糖迷雾 · 小地图被糖糊住了" : "看不清 · 小地图被糊住了";
+                MapUI.Jammed(r, jam);
+                return;
+            }
+            MapUI.DrawMinimap(r, p);
         }
 
-        void MapIcons(System.Func<Vector3, Vector2> map, float s, bool big)
+        void BigMap(float W, float H, Fighter p)
         {
-            var A = Arena.I;
-            foreach (var g in A.glass) { if (g == null) continue; var a = map(g.transform.position); Fill(new Rect(a.x - 3 * s, a.y - .8f * s, 6 * s, 1.6f * s), g.GetComponent<Collider>().enabled ? CGlass : new Color(.3f, .35f, .4f, .6f)); }
-            foreach (var d in A.destructibles) { var a = map(d.transform.position); Fill(new Rect(a.x - 2 * s, a.y - 2 * s, 4 * s, 4 * s), d.Alive ? CCover : new Color(.3f, .3f, .3f, .5f)); }
-            foreach (var sh in A.shutters) { var a = map(sh.transform.position); Fill(new Rect(a.x - 5 * s, a.y - 1.6f * s, 10 * s, 3.2f * s), sh.open ? CMed : CShutter); if (big) Text(new Rect(a.x - 30, a.y + 4, 60, 16), (sh.gate ? "铁门·" : "卷帘·") + (sh.open ? "开" : "关"), With(tiny, 11, TextAnchor.MiddleCenter), sh.gate ? CGate : CShutter); }
-            foreach (var d in A.doors) { var a = map(d.transform.position); Fill(new Rect(a.x - 5 * s, a.y - 1.6f * s, 10 * s, 3.2f * s), d.open ? CMed : CDoor); }
-            foreach (var i in Interactable.All)
-            {
-                if (i == null) continue;
-                var a = map(i.transform.position);
-                if (i is PowerBox pb) Icon(a, CPower, s * 1.2f, "电", big, pb.Dark);
-                else if (i is MedStation ms) Icon(a, CMed, s * 1.2f, "+", big, ms.Used);
-                else if (i is Terminal t) Icon(a, CDoor, s, "终", big, !t.Usable(game.player));
-            }
-            foreach (var b in A.barrels) { if (b == null) continue; var a = map(b.transform.position); Round(new Rect(a.x - 2.5f * s, a.y - 2.5f * s, 5 * s, 5 * s), b.GetComponent<Collider>().enabled ? CBarrel : new Color(.3f, .2f, .2f, .5f), 2.5f * s); }
-            foreach (var pad in Object.FindObjectsOfType<JumpPad>()) { var a = map(pad.transform.position); Icon(a, CPad, s * 1.1f, "↑", big); }
-            foreach (var c in A.cams) { if (c == null) continue; var a = map(c.transform.position); Icon(a, CCam, s, "监", big, !c.Working); }
-            foreach (var sp in A.spots)
-            {
-                var a = map(sp.pos); Color c = sp.kind == 0 ? CSniper : sp.kind == 1 ? CDefend : sp.kind == 3 ? CGate : CPlant;
-                float sz = (sp.kind == 2 ? 9 : 7.5f) * s;
-                var mat = GUI.matrix; CombatHud.RotP(45, a);
-                Fill(new Rect(a.x - sz / 2, a.y - sz / 2, sz, sz), new Color(0, 0, 0, .75f)); Fill(new Rect(a.x - sz / 2 + 1, a.y - sz / 2 + 1, sz - 2, sz - 2), c);
-                GUI.matrix = mat;
-                if (big) Shadowed(new Rect(a.x - 70, a.y + sz * .6f, 140, 16), sp.label, With(tiny, 11, TextAnchor.MiddleCenter), c);
-            }
+            Fill(new Rect(0, 0, W, H), new Color(.08f, .03f, .08f, .88f));
+            float lw = 290, top = 64, bottom = 70;
+            float mh = H - top - bottom, mw = mh * MapBase.SizeX / MapBase.SizeZ;
+            if (mw > W - lw - 70) { mw = W - lw - 70; mh = mw * MapBase.SizeZ / MapBase.SizeX; }
+            float x0 = (W - (mw + 20 + lw)) / 2;
+            Rect mr = new Rect(x0, top, mw, mh);
+            Shadowed(new Rect(mr.x, 18, mr.width, 36), MapUI.MapTitle + "  ·  M 关闭", With(centered, 22, TextAnchor.MiddleCenter), ToonAssets.Available ? new Color(1f, .85f, .92f) : Color.white);
+            MapUI.DrawBigMap(mr, p);
+            MapUI.LayerButtons(new Rect(mr.center.x - 230, mr.yMax + 14, 460, 36), (br, label, on) => Button(br, label, on));
+            MapLegend(new Rect(mr.xMax + 20, top, lw, mh));
         }
 
         void MapLegend(Rect r)
         {
             PanelBox(r, 12);
             Text(new Rect(r.x + 16, r.y + 10, r.width, 30), "地图图例", large);
-            var rows = new (Color, string)[] {
-                (new Color(1f, .5f, .2f), "A / B 包点"), (CPlant, "◆ 爆破点（安装炸弹位置）"), (CSniper, "◆ 狙击位（楼梯 / 弹射板上高台）"), (CGate, "检查站铁门 / ◆墙洞（打碎木箱钻过）"), (CDefend, "◆ 防守位（混凝土工事）"), (CShutter, "卷帘门（G 升降，有噪音）"), (CDoor, "门禁终端 / 侧门"), (CPower, "电闸（包点断电 20 秒）"),
-                (CMed, "医疗站（+50 生命 +25 护甲）"), (CPad, "弹射板（弹上高台）"), (CBarrel, "爆炸桶（射击引爆）"), (CCam, "守方监控（可击毁）"),
-                (CGlass, "可击碎玻璃"), (CCover, "可破坏木箱掩体"), (Config.Blue, "蓝队"), (Config.Red, "红队（仅被侦测时显示）") };
+            var rows = MapUI.LegendRows(game.player);
+            float step = Mathf.Min(34, (r.height - 100) / rows.Length);
             for (int i = 0; i < rows.Length; i++)
             {
-                float y = r.y + 52 + i * Mathf.Min(34, (r.height - 100) / rows.Length);
-                Round(new Rect(r.x + 18, y + 6, 14, 14), rows[i].Item1, 7);
-                Text(new Rect(r.x + 42, y, r.width - 50, 26), rows[i].Item2, With(small, 14, TextAnchor.MiddleLeft));
+                float y = r.y + 52 + i * step;
+                MapIcons.Draw(new Rect(r.x + 14, y + 2, 22, 22), rows[i].Item1, rows[i].Item2);
+                Text(new Rect(r.x + 44, y, r.width - 52, 26), rows[i].Item3, With(small, 13, TextAnchor.MiddleLeft));
             }
-            Text(new Rect(r.x + 16, r.yMax - 34, r.width - 20, 24), "灰暗的图标 = 已使用 / 已破坏", With(tiny, 12, TextAnchor.MiddleLeft));
+            Text(new Rect(r.x + 16, r.yMax - 34, r.width - 20, 24), "灰色图标 = 冷却中 · 数字 = 剩余秒数", With(tiny, 12, TextAnchor.MiddleLeft));
         }
 
         void NearbyLabels(float s, Fighter p)
@@ -699,8 +627,8 @@ namespace NeonSiege
             var zn = Arena.Zones[zone];
             float y = 104;
             Fill(new Rect(W / 2 - 220, y + 4, 440, 1.5f), new Color(zn.color.r, zn.color.g, zn.color.b, .7f * a));
-            Shadowed(new Rect(W / 2 - 300, y + 8, 600, 34), "◆ " + zn.name, With(centered, 24, TextAnchor.MiddleCenter), new Color(zn.color.r, zn.color.g, zn.color.b, a));
-            Text(new Rect(W / 2 - 300, y + 40, 600, 22), zn.hint, With(tiny, 13, TextAnchor.MiddleCenter), new Color(.85f, .9f, 1f, a * .9f));
+            Shadowed(new Rect(W / 2 - 300, y + 8, 600, 34), "◆ " + MapUI.ZoneDisplayName(zone), With(centered, 24, TextAnchor.MiddleCenter), new Color(zn.color.r, zn.color.g, zn.color.b, a));
+            Text(new Rect(W / 2 - 300, y + 40, 600, 22), MapUI.ZoneDisplayHint(zone), With(tiny, 13, TextAnchor.MiddleCenter), new Color(.85f, .9f, 1f, a * .9f));
         }
 
         Texture2D scopeMask;
@@ -1402,7 +1330,7 @@ namespace NeonSiege
         void Settings(float W, float H)
         {
             Backdrop(W, H, .78f);
-            float pw = Mathf.Min(820, W - 40), ph = 700, x = (W - pw) / 2, y = (H - ph) / 2;
+            float pw = Mathf.Min(820, W - 40), ph = 790, x = (W - pw) / 2, y = (H - ph) / 2;
             PanelBox(new Rect(x, y, pw, ph), 16);
             Text(new Rect(x + 36, y + 18, pw, 50), "设置", With(title, 34, TextAnchor.MiddleLeft), Color.white);
             float ly = y + 92, lx = x + 40, sx = x + 300, sw = pw - 460;
@@ -1412,33 +1340,42 @@ namespace NeonSiege
                 Text(new Rect(sx + sw + 20, ly, 120, 34), value, With(normal, 19, TextAnchor.MiddleLeft), new Color(.95f, .75f, .35f));
             }
             Row("鼠标灵敏度", GameSettings.Sensitivity.ToString("0.0"));
-            GameSettings.Sensitivity = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.Sensitivity, .4f, 6f) * 10f) / 10f; ly += 62;
+            GameSettings.Sensitivity = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.Sensitivity, .4f, 6f) * 10f) / 10f; ly += 56;
             Row("开镜灵敏度倍率", "×" + GameSettings.AdsSensitivity.ToString("0.00"));
-            GameSettings.AdsSensitivity = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.AdsSensitivity, .3f, 1.5f) * 20f) / 20f; ly += 62;
+            GameSettings.AdsSensitivity = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.AdsSensitivity, .3f, 1.5f) * 20f) / 20f; ly += 56;
             Row("视野（FOV）", GameSettings.Fov.ToString("0") + "°");
-            GameSettings.Fov = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.Fov, 65f, 100f)); ly += 62;
+            GameSettings.Fov = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.Fov, 65f, 100f)); ly += 56;
             Row("主音量", Mathf.RoundToInt(GameSettings.Volume * 100) + "%");
             float vol = Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.Volume, 0f, 1f);
             if (!Mathf.Approximately(vol, GameSettings.Volume)) { GameSettings.Volume = vol; AudioListener.volume = vol; }
-            ly += 62;
+            ly += 56;
             Text(new Rect(lx, ly, 250, 34), "画质", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));
             string[] q = { "低", "中", "高" };
             for (int i = 0; i < 3; i++)
                 if (Button(new Rect(sx + i * (sw / 3f + 4), ly, sw / 3f - 4, 38), q[i], GameSettings.Quality == i)) { GameSettings.Quality = i; GameSettings.Apply(); }
-            ly += 62;
+            ly += 56;
             Row("敌人描边强度", Mathf.RoundToInt(GameSettings.EnemyOutline * 100) + "%");
-            GameSettings.EnemyOutline = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.EnemyOutline, 0f, 2f) * 20f) / 20f; ly += 62;
+            GameSettings.EnemyOutline = Mathf.Round(Slider(new Rect(sx, ly + 8, sw, 18), GameSettings.EnemyOutline, 0f, 2f) * 20f) / 20f; ly += 56;
             Text(new Rect(lx, ly, 250, 34), "伤害数字", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));
             if (Button(new Rect(sx, ly, sw / 3f - 4, 38), "显示", GameSettings.DamageNumbers)) GameSettings.DamageNumbers = true;
             if (Button(new Rect(sx + sw / 3f + 4, ly, sw / 3f - 4, 38), "隐藏", !GameSettings.DamageNumbers)) GameSettings.DamageNumbers = false;
-            ly += 62;
+            ly += 56;
             Text(new Rect(lx, ly, 250, 34), "新手提示卡", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));   // V21：默认开，可关
             if (Button(new Rect(sx, ly, sw / 3f - 4, 38), "开", GameSettings.Tips)) GameSettings.Tips = true;
             if (Button(new Rect(sx + sw / 3f + 4, ly, sw / 3f - 4, 38), "关", !GameSettings.Tips)) GameSettings.Tips = false;
-            ly += 62;
+            ly += 56;
+            Text(new Rect(lx, ly, 250, 34), "小地图朝向", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));   // V23 b：拍板 2 乙
+            if (Button(new Rect(sx, ly, sw / 2f - 4, 38), "跟随视角", GameSettings.MinimapRotate)) GameSettings.MinimapRotate = true;
+            if (Button(new Rect(sx + sw / 2f + 4, ly, sw / 2f - 4, 38), "北向固定", !GameSettings.MinimapRotate)) GameSettings.MinimapRotate = false;
+            ly += 56;
+            Text(new Rect(lx, ly, 250, 34), "食材指引", With(normal, 19, TextAnchor.MiddleLeft), new Color(.85f, .9f, .95f));   // V23 b：§3.3
+            string[] gopt = { "全部", "只小地图", "关" };
+            for (int i = 0; i < 3; i++)
+                if (Button(new Rect(sx + i * (sw / 3f + 4), ly, sw / 3f - 4, 38), gopt[i], GameSettings.IngredientGuide == i)) GameSettings.IngredientGuide = i;
+            ly += 56;
             Text(new Rect(lx, ly, pw - 80, 26), "画质「低」关闭环境光遮蔽和泛光，阴影距离缩短，适合轻薄本。设置会自动保存。", With(small, 14, TextAnchor.MiddleLeft), new Color(.6f, .65f, .7f));
             if (Button(new Rect(x + 40, y + ph - 76, 220, 52), "恢复默认", false))
-            { GameSettings.Sensitivity = 2f; GameSettings.AdsSensitivity = 1f; GameSettings.Fov = 78f; GameSettings.Volume = .9f; GameSettings.Quality = 2; GameSettings.DamageNumbers = true; GameSettings.Tips = true; GameSettings.Apply(); }
+            { GameSettings.Sensitivity = 2f; GameSettings.AdsSensitivity = 1f; GameSettings.Fov = 78f; GameSettings.Volume = .9f; GameSettings.Quality = 2; GameSettings.DamageNumbers = true; GameSettings.Tips = true; GameSettings.MinimapRotate = true; GameSettings.IngredientGuide = 0; GameSettings.Apply(); }
             if (Button(new Rect(x + pw - 300, y + ph - 76, 260, 52), "保存并返回")) { GameSettings.Save(); overlay = returnTo; if (overlay == Overlay.None) ShowCursor(false); }
         }
     }

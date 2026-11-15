@@ -282,7 +282,7 @@ namespace NeonSiege
                     e.Launch(away.normalized * 9f + Vector3.up * 6f);
                     if (Time.time < ramUntil) DamageCtx.Set(DamageKind.Ult, UltName(f.role)); else DamageCtx.Set(DamageKind.Food, Ingredients.FormName(form) + "冲撞");
                     e.ReceiveDamage(Time.time < ramUntil ? 45f : 25f, f, f.transform.position, false);
-                    Sfx.Play("food_boing", e.Chest, 1f, .8f, 1f, 30f); Fx.Burst(e.Chest, Vector3.up, Ingredients.FormColor(form), 18, 4f, .08f, .6f, .6f);
+                    Sfx.Play(Time.time < ramUntil ? "food_burger_chomp" : "food_boing", e.Chest, 1f, .8f, 1f, 30f); Fx.Burst(e.Chest, Vector3.up, Time.time < ramUntil ? UltFx.Bun : Ingredients.FormColor(form), 18, 4f, .08f, .6f, .6f);   // V23：大招撞人是"啊呜"一口
                 }
         }
         System.Collections.IEnumerator Unram(Fighter e) { yield return new WaitForSeconds(1.2f); rammed.Remove(e); }
@@ -328,6 +328,7 @@ namespace NeonSiege
                     break;
             }
             UltWarn.OnUlt(f, ground);   // V22 第三期：敌方大招预警（横幅 + 全图专属音 + 状态条 + 蜡烛落点圈），生效时间不变
+            UltFx.Cast(f, ground);      // V23 A2：施放瞬间 / 持续 / 结束的美食表现（规则在上面已经生效，这里只加表现）
             return true;
         }
     }
@@ -385,20 +386,83 @@ namespace NeonSiege
         void LateUpdate() { var c = Camera.main; if (c != null) transform.rotation = Quaternion.LookRotation(transform.position - c.transform.position); }
     }
 
+    // V23 b：刷新规则乙（设计稿_V23 §3.4，拍板 3）—— 点位不变（18 个），①洗牌袋代替纯随机；②配对保底：
+    // 有人手上正好 1 样、地图上没有它的搭档时，这次刷新有 PityChance 概率刷成搭档，刷在离这个人 PityMinDist–PityMaxDist 米的空点上。
     public class IngredientSpot : MonoBehaviour
     {
         public static readonly List<IngredientSpot> All = new List<IngredientSpot>();
+        public static float PityChance = .6f, PityMinDist = 25f, PityMaxDist = 40f;   // 50–70% / 25–40 m
+        public static System.Random Rng = new System.Random();
+        static readonly List<string> bag = new List<string>();
+        // 遥测：刷新总数 / 满足保底条件的次数 / 条件下刷成搭档的次数 / 其中保底触发次数 / 保底刷新到持有者的平均距离
+        public static int Spawns, PityCond, PityPartner, PityHit; public static float PityDistSum;
+        public static void ResetStats() { Spawns = PityCond = PityPartner = PityHit = 0; PityDistSum = 0; }
         IngredientPickup current; float respawnAt;
         void OnEnable() { All.Add(this); }
         void OnDisable() { All.Remove(this); }
         float Delay { get { return Match.Mode == GameMode.Cook ? 8f : 16f; } }
+        public bool Empty { get { return current == null; } }
+        public float NextIn { get { return current != null ? float.MaxValue : Mathf.Max(0, respawnAt - Time.time); } }
         public void Taken() { current = null; respawnAt = Time.time + Delay; }
         public void ResetRound() { if (current != null) Destroy(current.gameObject); current = null; respawnAt = Time.time + Random.Range(0f, 4f); }
+
+        public static string DrawBag(System.Random r)
+        {
+            if (bag.Count == 0) bag.AddRange(Ingredients.All);
+            int i = r.Next(bag.Count); string id = bag[i]; bag.RemoveAt(i); return id;
+        }
+        public static void ResetBag() { bag.Clear(); }
+
+        // 纯函数，测试直接调：held = 需要搭档的人手上那样（null = 没人需要）；empty = 空点位置；返回刷什么，spotIdx = 刷到哪个空点（-1 = 刷在原来的点）
+        public static string Decide(string held, Vector3 holderPos, IList<Vector3> empty, System.Random r, out int spotIdx, out bool pity)
+        {
+            spotIdx = -1; pity = false;
+            if (held != null && r.NextDouble() < PityChance)
+            {
+                var parts = FoodGuide.Partners(held);
+                var ok = new List<int>();
+                for (int i = 0; i < empty.Count; i++) { float d = Links.Flat(empty[i], holderPos); if (d >= PityMinDist && d <= PityMaxDist) ok.Add(i); }
+                if (parts.Count > 0 && ok.Count > 0) { spotIdx = ok[r.Next(ok.Count)]; pity = true; return parts[r.Next(parts.Count)]; }
+            }
+            return DrawBag(r);
+        }
+        // 谁需要搭档：活着、手上正好 1 样、没变身、地图上没有它的搭档（优先真人玩家）
+        public static Fighter Needy()
+        {
+            var m = Match.I; if (m == null) return null;
+            Fighter best = null;
+            foreach (var f in m.fighters)
+            {
+                if (!f.alive || f.Food.ingredients.Count != 1 || f.Food.Transformed) continue;
+                if (HasPartnerOnMap(f.Food.ingredients[0])) continue;
+                if (best == null || f.human) best = f;
+            }
+            return best;
+        }
+        public static bool HasPartnerOnMap(string held)
+        {
+            foreach (var ip in IngredientPickup.Live) if (ip != null && ip.id != null && Ingredients.Recipe(held, ip.id) != FoodForm.Dark) return true;
+            return false;
+        }
+        void Put(string id) { current = IngredientPickup.Spawn(id, transform.position, this); Spawns++; }
+
         void Update()
         {
             if (Match.I == null || current != null || Time.time < respawnAt) return;
             if (Match.I.phase == Phase.MatchEnd) return;
-            current = IngredientPickup.Spawn(Ingredients.All[Random.Range(0, Ingredients.All.Length)], transform.position, this);
+            var needy = Needy(); string held = needy != null ? needy.Food.ingredients[0] : null;
+            var empty = new List<IngredientSpot>(); var pos = new List<Vector3>();
+            if (held != null) foreach (var sp in All) if (sp != null && sp.Empty) { empty.Add(sp); pos.Add(sp.transform.position); }
+            string id = Decide(held, held != null ? needy.transform.position : Vector3.zero, pos, Rng, out int idx, out bool pity);
+            if (held != null)
+            {
+                PityCond++;
+                if (Ingredients.Recipe(held, id) != FoodForm.Dark) PityPartner++;
+                if (pity) { PityHit++; PityDistSum += Links.Flat(pos[idx], needy.transform.position); }
+            }
+            var target = idx >= 0 ? empty[idx] : this;
+            target.Put(id);
+            if (target != this) respawnAt = Time.time + Delay * .5f;   // 这次刷新挪到了别的点：本点稍后再刷，总刷新速度基本不变
         }
     }
 
@@ -577,20 +641,32 @@ namespace NeonSiege
     // 汽水手雷 + 曼妥思 = 喷泉
     public class MentosPile : MonoBehaviour
     {
+        public const float TriggerRadius = 4.5f, Cooldown = 15f;
         public static readonly List<MentosPile> All = new List<MentosPile>();
+        public static int Fountains; public static float LastAt = -9;   // V23：测试读
         float readyAt;
-        void OnEnable() { All.Add(this); }
+        public bool Ready { get { return Time.time >= readyAt; } }
+        public void ResetRound() { readyAt = 0; }
+        void OnEnable() { if (!All.Contains(this)) All.Add(this); }
         void OnDisable() { All.Remove(this); }
-        public static void TryFountain(Vector3 blast, Fighter owner)
+        // V23 A1：判定用"瓶子中心"（离地 0.85 m）到爆点的水平距离 + 高度差 ≤ 2.5 m，不再用脚底原点的 3D 距离
+        public static bool InRange(Vector3 pile, Vector3 blast) { return Links.Flat(pile, blast) <= TriggerRadius && Mathf.Abs(blast.y - (pile.y + .85f)) <= 2.5f; }
+        public static void TryFountain(Vector3 blast, Fighter owner, MentosPile touched = null)
         {
-            foreach (var p in All)
+            foreach (var p in All.ToArray())
             {
-                if (Time.time < p.readyAt || Vector3.Distance(p.transform.position, blast) > 4.5f) continue;
+                if (p == null || Time.time < p.readyAt || !(InRange(p.transform.position, blast) || p == touched)) continue;
+                Fountains++; LastAt = Time.time;
                 p.readyAt = Time.time + 15f;
                 Vector3 c = p.transform.position;
                 for (int i = 0; i < 3; i++) Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, new Color(.45f, .22f, .1f), 60, 16f, .15f, 1.6f, .7f);
                 Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, Color.white, 40, 12f, .25f, 1.4f, .3f, Fx.Smoke);
                 Sfx.Play("food_fizz", c, 1f, .7f, 1f, 80f); Sfx.Play("food_boing", c, 1f, .6f, 1f, 60f);
+                // V23 A1：原来的喷泉和普通汽水罐爆炸几乎一样（同一个 food_fizz、同色小粒子 0.15 m），离远了看不出"喷了" → 加一根 2.5 s 的可乐水柱 + 泡沫圈 + 专属音 + 头顶字
+                ColaFountain.Spawn(c);
+                Sfx.Play("food_can_open", c, 1f, .6f, 1f, 80f); Sfx.Play("food_burp", c, .9f, .7f, 1f, 60f);
+                Fx.Shake(c, .5f, 18f);
+                SkillPop.World(c + Vector3.up * 3.2f, "可乐喷泉！", new Color(1f, .8f, .45f), null, 1.8f);
                 if (Match.I != null)
                     foreach (var f in Match.I.fighters)
                     {
@@ -599,8 +675,43 @@ namespace NeonSiege
                         if (d.magnitude > 5.5f) continue;
                         f.Launch(Vector3.up * 15f + d.normalized * 4f);
                     }
-                Match.I.Feed("曼妥思 + 汽水 = 可乐喷泉！", new Color(.9f, .7f, .5f));
+                if (Match.I != null) Match.I.Feed("曼妥思 + 汽水 = 可乐喷泉！", new Color(.9f, .7f, .5f));
             }
+        }
+    }
+
+    // V23 A1：可乐喷泉的持续表现（2.5 s 水柱，高 ≈ 9 m，顶上开花；喷完留一滩泡沫）
+    public class ColaFountain : MonoBehaviour
+    {
+        float born; ParticleSystem col, foam; Light lamp;
+        public static ColaFountain Spawn(Vector3 at) { var go = new GameObject("可乐喷泉"); go.transform.position = at; var f = go.AddComponent<ColaFountain>(); f.born = Time.time; return f; }
+        ParticleSystem Make(string n, Color a, Color b, float size0, float size1, float speed0, float speed1, float rate, float radius, float grav, Material mat)
+        {
+            var g = new GameObject(n); g.transform.SetParent(transform, false); g.transform.localPosition = Vector3.up * 1.6f;
+            var ps = g.AddComponent<ParticleSystem>(); var main = ps.main;
+            main.startLifetime = new ParticleSystem.MinMaxCurve(.9f, 1.4f); main.startSpeed = new ParticleSystem.MinMaxCurve(speed0, speed1); main.startSize = new ParticleSystem.MinMaxCurve(size0, size1);
+            main.startColor = new ParticleSystem.MinMaxGradient(a, b); main.gravityModifier = grav; main.maxParticles = 900; main.simulationSpace = ParticleSystemSimulationSpace.World;
+            var em = ps.emission; em.rateOverTime = rate; var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 6f; sh.radius = radius; sh.rotation = new Vector3(-90, 0, 0);
+            g.GetComponent<ParticleSystemRenderer>().material = mat; return ps;
+        }
+        void Start()
+        {
+            col = Make("可乐水柱", new Color(.45f, .22f, .08f), new Color(.7f, .42f, .18f), .35f, .7f, 11f, 14f, 260f, .25f, 1f, Fx.Smoke);   // 半透明混合（加色混合的深棕色在亮背景上几乎看不见）
+            foam = Make("泡沫", Color.white, new Color(1f, .93f, .8f), .35f, .8f, 9f, 13f, 90f, .3f, .9f, Fx.Smoke);
+            lamp = new GameObject("喷泉光").AddComponent<Light>(); lamp.transform.SetParent(transform, false); lamp.transform.localPosition = Vector3.up * 3f; lamp.color = new Color(1f, .7f, .4f); lamp.range = 12f; lamp.intensity = 3f;
+            Fx.Shockwave(transform.position, 5.5f, new Color(1f, .9f, .75f), .5f);
+        }
+        void Update()
+        {
+            float age = Time.time - born;
+            if (age > 2.5f && col != null)
+            {
+                var e1 = col.emission; e1.enabled = false; var e2 = foam.emission; e2.enabled = false;
+                if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit g, 3f, ~0, QueryTriggerInteraction.Ignore)) { var q = FoodFx.Splat(g.point, g.normal, new Color(.6f, .38f, .2f), 3f); if (q != null) Destroy(q, 8f); }
+                col = null;
+            }
+            if (lamp != null) lamp.intensity = age < 2.5f ? 2.5f + Mathf.PerlinNoise(Time.time * 6f, 0) : Mathf.MoveTowards(lamp.intensity, 0, Time.deltaTime * 4f);
+            if (age > 4.5f) Destroy(gameObject);
         }
     }
 
@@ -619,7 +730,7 @@ namespace NeonSiege
             var fs = attacker.Food;
             if (IsHotpot(h.collider))
             {
-                if (fs.Transformed && fs.form == FoodForm.IceCream && SteamCloud.Suppress(8f))
+                if (fs.Transformed && fs.form == FoodForm.IceCream && SteamCloud.Suppress(h.collider.transform.position, SteamCloud.SuppressRadius, 8f))   // V23：只散被打的这口锅周围 12 m
                     Match.I.Feed("冰淇淋把火锅降温了，热气散开！", new Color(.7f, .9f, 1f));
                 if (w.id == "FS-12" && Time.time >= splashReady)
                 {
@@ -640,7 +751,7 @@ namespace NeonSiege
     // ---------------------------------------------------------------- 大招产物
     public class RiceWall : MonoBehaviour, IDamageable
     {
-        public float hp = 400; float born;
+        public float hp = 400; float born; Transform look; Vector3 lookPos, lookScale; bool landed;
         public static void Spawn(Vector3 at, float yaw, Fighter owner)
         {
             var go = new GameObject("饭团墙"); go.transform.position = at; go.transform.rotation = Quaternion.Euler(0, yaw, 0);
@@ -648,15 +759,40 @@ namespace NeonSiege
             var m = Arena.Model("Toon/Hats/Hat_Onigiri");
             if (m != null) { foreach (var c in m.GetComponentsInChildren<Collider>()) Destroy(c); Arena.Fit(m, new Vector3(2.4f, 1.4f, .8f)); m.transform.SetParent(go.transform, false); }
             var w = go.AddComponent<RiceWall>(); w.born = Time.time;
-            FoodFx.KillPop(at + Vector3.up * .7f);
+            if (m != null && Skills.Food) { w.look = m.transform; w.lookPos = m.transform.localPosition; w.lookScale = m.transform.localScale; m.transform.localPosition = w.lookPos + Vector3.up * 2.5f; }
+            else FoodFx.KillPop(at + Vector3.up * .7f);
         }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
         {
             hp -= amount; Fx.Burst(transform.position + Vector3.up * .7f, Vector3.up, Color.white, 4, 2f, .05f, .4f, .8f);
-            if (hp <= 0) { FoodFx.KillPop(transform.position + Vector3.up * .7f); Destroy(gameObject); }
+            if (Skills.Food) Sfx.Play("food_squish", transform.position + Vector3.up * .7f, .3f, 1.5f, 1f, 20f);
+            if (hp <= 0) { Crumble(); Destroy(gameObject); }
             return true;
         }
-        void Update() { if (Time.time - born > 15f || Match.I == null || Match.I.phase != Phase.Live) Destroy(gameObject); }
+        void Crumble()
+        {
+            FoodFx.KillPop(transform.position + Vector3.up * .7f);
+            if (Skills.Food) { Fx.Debris(transform.position + Vector3.up * .7f, UltFx.Rice, 12); Sfx.Play("food_rice_thud", transform.position, .7f, 1.3f, 1f, 35f); }
+        }
+        void Update()
+        {
+            float age = Time.time - born;
+            if (look != null && !landed)
+            {
+                // V23：0.25 s 从天而降，落地压扁回弹 + 沉闷"咚" + 米粒四溅 + 轻微震屏
+                float k = Mathf.Clamp01(age / .25f);
+                look.localPosition = lookPos + Vector3.up * 2.5f * (1 - k * k);
+                if (k >= 1f)
+                {
+                    landed = true; look.localPosition = lookPos;
+                    Sfx.Play("food_rice_thud", transform.position, 1f, Random.Range(.95f, 1.05f), 1f, 45f);
+                    Fx.Burst(transform.position + Vector3.up * .2f, Vector3.up, UltFx.Rice, 30, 4f, .05f, .7f, 1.2f);
+                    Fx.Shockwave(transform.position, 2.5f, UltFx.Rice, .35f); Fx.Shake(transform.position, .35f, 12f);
+                }
+            }
+            if (look != null && landed && age < .55f) { float j = Mathf.Exp(-(age - .25f) * 12f) * Mathf.Sin((age - .25f) * 40f); look.localScale = Vector3.Scale(lookScale, new Vector3(1 + .08f * j, 1 - .12f * j, 1 + .08f * j)); } else if (look != null && landed) look.localScale = lookScale;
+            if (age > 15f || Match.I == null || Match.I.phase != Phase.Live) { if (Match.I != null && age > 15f) { Crumble(); UltFx.End(null, Role.Rivet, transform.position); } Destroy(gameObject); }
+        }
     }
 
     public class JellyDome : MonoBehaviour
@@ -668,13 +804,38 @@ namespace NeonSiege
             go.transform.position = at; go.transform.localScale = Vector3.one * 10f;
             var r = go.GetComponent<Renderer>(); var m = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, .5f, .75f, .18f) }; r.sharedMaterial = m; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             var d = go.AddComponent<JellyDome>(); d.owner = owner; d.born = Time.time;
-            Sfx.Play("food_boing", at, 1f, .7f, 1f, 40f);
+            Sfx.Play(Skills.Food ? "food_jelly_dome" : "food_boing", at, 1f, Skills.Food ? 1f : .7f, 1f, 40f);
+            if (Skills.Food)
+            {
+                var cap = GameObject.CreatePrimitive(PrimitiveType.Sphere); Destroy(cap.GetComponent<Collider>()); cap.name = "果冻高光";
+                cap.transform.SetParent(go.transform, false); cap.transform.localPosition = new Vector3(-.18f, .3f, -.18f); cap.transform.localScale = new Vector3(.18f, .1f, .18f);
+                cap.GetComponent<Renderer>().sharedMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, 1f, 1f, .35f) }; cap.GetComponent<Renderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            }
         }
+        public static float Squash(float age)   // V23：0.4 s 果冻出场 —— 竖向 0 → 1.15 → 0.9 → 1，横向反着来
+        {
+            if (age >= .4f) return 1f;
+            return 1f + Mathf.Sin(age / .4f * Mathf.PI * 2.5f) * .15f * (1 - age / .4f);
+        }
+        float wobbleSfx;
         void Update()
         {
             float age = Time.time - born;
-            transform.localScale = Vector3.one * 10f * (1f + .03f * Mathf.Sin(Time.time * 6f)) * Mathf.Clamp01(age * 4f);
-            if (age > 8f || Match.I == null) { Destroy(gameObject); return; }
+            if (Skills.Food) { float sq = Squash(age), grow = Mathf.Clamp01(age * 4f); transform.localScale = new Vector3(10f * (2f - sq) * grow, 10f * sq * grow, 10f * (2f - sq) * grow) * (1f + .03f * Mathf.Sin(Time.time * 6f)); }
+            else transform.localScale = Vector3.one * 10f * (1f + .03f * Mathf.Sin(Time.time * 6f)) * Mathf.Clamp01(age * 4f);
+            if (Skills.Food && Time.time >= wobbleSfx && age > .5f) { wobbleSfx = Time.time + 1.6f; Sfx.Play("food_jelly_boing", transform.position, .35f, 1.3f, 1f, 30f); }
+            if (age > 8f || Match.I == null)
+            {
+                if (Match.I != null && Skills.Food)
+                {
+                    // V23：结束 —— "啵"地破开，掉一地果冻块
+                    Sfx.Play("food_splat", transform.position, 1f, .8f, 1f, 40f); Sfx.Play("food_boing", transform.position, .7f, 1.4f, 1f, 40f);
+                    for (int i = 0; i < 3; i++) Fx.Burst(transform.position + Vector3.up * 2f, Vector3.up, i == 1 ? Color.white : UltFx.Jelly, 30, 6f, .14f, .8f, 1.1f);
+                    Fx.Shockwave(transform.position, 5f, UltFx.Jelly, .45f);
+                    UltFx.End(owner, Role.Ironwall, transform.position);
+                }
+                Destroy(gameObject); return;
+            }
             if (Time.time < tick) return; tick = Time.time + .5f;
             foreach (var f in Match.I.fighters)
                 if (f.alive && owner != null && f.team == owner.team && Vector3.Distance(f.transform.position, transform.position) < 5f && f.hp < Config.MaxHp)
@@ -686,16 +847,40 @@ namespace NeonSiege
     {
         Fighter owner; Vector3 center; int dropped; float next;
         public int Dropped { get { return dropped; } }   // V22 第三期：测试读"生效时间不变"
-        public static void Spawn(Vector3 at, Fighter owner) { var go = new GameObject("蜡烛轰炸"); var c = go.AddComponent<CandleBarrage>(); c.owner = owner; c.center = at; c.next = Time.time + .3f; }
+        public static void Spawn(Vector3 at, Fighter owner) { var go = new GameObject("蜡烛轰炸"); var c = go.AddComponent<CandleBarrage>(); c.owner = owner; c.center = at; c.next = Time.time + .3f; if (Skills.Food) c.Queue(); }
+        // V23：下一根蜡烛的落点提前抽好，好让蜡烛在落地前 0.3 s 就从天上落下（落地 / 爆炸时刻不变）
+        Vector2 nextR; bool queued; Transform falling; float fallStart;
+        void Queue()
+        {
+            nextR = Random.insideUnitCircle * 4.5f; queued = true;
+            if (falling != null) Destroy(falling.gameObject);
+            falling = new GameObject("落下的生日蜡烛").transform; fallStart = Time.time;
+            var stick = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Destroy(stick.GetComponent<Collider>()); stick.transform.SetParent(falling, false); stick.transform.localScale = new Vector3(.25f, .6f, .25f);
+            stick.GetComponent<Renderer>().sharedMaterial = Arena.Glow(FoodFx.Confetti[(dropped + 1) % 6], 1.2f);
+            var fl = GameObject.CreatePrimitive(PrimitiveType.Sphere); Destroy(fl.GetComponent<Collider>()); fl.transform.SetParent(falling, false); fl.transform.localPosition = Vector3.up * .8f; fl.transform.localScale = new Vector3(.2f, .3f, .2f);
+            fl.GetComponent<Renderer>().sharedMaterial = Arena.Glow(new Color(1f, .7f, .2f), 6f);
+            var tr = falling.gameObject.AddComponent<TrailRenderer>(); tr.time = .25f; tr.startWidth = .2f; tr.endWidth = 0; tr.material = Fx.Additive; tr.startColor = new Color(1f, .7f, .25f); tr.endColor = new Color(1f, .4f, .2f, 0);
+            foreach (var rr in falling.GetComponentsInChildren<Renderer>()) rr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            Sfx.Play("food_candle_whoosh", center + new Vector3(nextR.x, 6f, nextR.y), .7f, Random.Range(.95f, 1.1f), 1f, 50f);
+        }
+        void OnDestroy() { if (falling != null) Destroy(falling.gameObject); }
         void Update()
         {
+            if (falling != null)
+            {
+                Vector3 g = Skills.GroundAt(center + new Vector3(nextR.x, 0, nextR.y));
+                float k = Mathf.Clamp01((Time.time - fallStart) / Mathf.Max(.05f, next - fallStart));
+                falling.position = g + Vector3.up * (.3f + 14f * (1 - k * k));
+            }
             if (Time.time < next) return;
             next = Time.time + .33f; dropped++;
-            Vector2 r = Random.insideUnitCircle * 4.5f; Vector3 p = Skills.GroundAt(center + new Vector3(r.x, 0, r.y));
+            Vector2 r = queued ? nextR : Random.insideUnitCircle * 4.5f; Vector3 p = Skills.GroundAt(center + new Vector3(r.x, 0, r.y));
+            if (Skills.Food && dropped < 6) Queue(); else if (falling != null) { Destroy(falling.gameObject); falling = null; }
             Fx.Explosion(p, 2.5f);
             for (int i = 0; i < 3; i++) Fx.Burst(p + Vector3.up * .3f, Vector3.up, FoodFx.Confetti[(dropped + i) % 6], 18, 6f, .08f, .8f, .8f);
             FoodFx.Splat(p + Vector3.up * .02f, Vector3.up, new Color(1f, .97f, .92f), 1.4f);
             Sfx.Play("boom", p, .5f, 1.3f, 1f, 70f); Sfx.Play("food_confetti", p, .6f, 1.1f, 1f, 50f);
+            if (Skills.Food) { Fx.Shockwave(p, 3.5f, new Color(1f, .97f, .92f), .35f); Fx.Shake(p, .3f, 14f); if (dropped >= 6) UltFx.End(owner, Role.Ember, p); }   // V23：奶油冲击环；最后一根 = 结束
             if (Match.I != null)
                 foreach (var f in Match.I.fighters)
                 {
@@ -888,6 +1073,7 @@ namespace NeonSiege
                     Fill(b, new Color(1, 1, 1, .9f)); Txt(b, FoodState.EmoteLabel(clip), new GUIStyle(center) { fontSize = 15 }, new Color(.3f, .15f, .2f));
                 }
             if (p == null) return;
+            if (m.ui != null && m.ui.OverlayName == "Map") return;   // V23 b：M 大地图打开时不压在地图上
             var fs = p.Food;
             // 食材格 + 变身 + 大招（左下角面板上方）
             float x = 16, y = H - 230;
@@ -899,7 +1085,7 @@ namespace NeonSiege
                 else Txt(slot, "空", new GUIStyle(center) { fontSize = 13 }, new Color(.6f, .6f, .7f));
             }
             if (Match.Mode != GameMode.Cook && fs.ingredients.Count == 1)
-                Txt(new Rect(x + 222, y, 460, 34), FoodGuide.HudHint(fs.ingredients), new GUIStyle(small) { fontSize = 15 }, new Color(.6f, 1f, .65f));   // V21：差一样：鸡蛋 → 巨型蛋糕
+                Txt(new Rect(x + 222, y, 760, 34), IngredientGuide.HudLine(p), new GUIStyle(small) { fontSize = 15 }, new Color(.6f, 1f, .65f));   // V21：差一样：鸡蛋 → 巨型蛋糕；V23 b：同一行接"最近的鸡蛋 32 米" / "地图上暂时没有鸡蛋"
             if (Match.Mode == GameMode.Cook && fs.ingredients.Count > 0) Txt(new Rect(x + 222, y, 360, 34), "把食材送回自己队的大锅", small, new Color(1f, .85f, .7f));
             // 大招
             Rect ub = new Rect(x, y + 40, 208, 14); Fill(ub, new Color(.08f, .05f, .1f, .8f));

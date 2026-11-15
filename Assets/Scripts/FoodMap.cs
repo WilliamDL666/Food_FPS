@@ -105,23 +105,41 @@ namespace NeonSiege
         public static void ExpireTimed(int id) { if (id >= 0 && id < timedUntil.Count) timedUntil[id] = 0; }   // V22 第三期：棉花糖蒸汽被冰淇淋吹散 / 提前结束
         public static void ClearTimed() { timed.Clear(); timedUntil.Clear(); }
         public static int TimedActive { get { int n = 0; foreach (var u in timedUntil) if (Time.time < u) n++; return n; } }
-        public static void Clear() { clouds.Clear(); suppressedUntil = 0; particles.Clear(); ClearTimed(); }
-        static float suppressedUntil; public static readonly List<ParticleSystem> particles = new List<ParticleSystem>();
-        public static bool Suppressed { get { return Time.time < suppressedUntil; } }
-        // V18：冰淇淋给火锅降温，热气散开一段时间
-        public static bool Suppress(float secs)
+        public static void Clear() { clouds.Clear(); sups.Clear(); anyParticleOff = false; particles.Clear(); ClearTimed(); }
+        public static readonly List<ParticleSystem> particles = new List<ParticleSystem>();
+        // V23 a-1：冰淇淋"散热气"从全图改成局部 —— 只散被打的那口锅周围 SuppressRadius 米（设计稿 §4.0 隐患 2：10–14 m，取 12）。
+        // 每个散雾是一个球（中心 / 半径 / 到期时间）；蒸汽云的中心落在任何一个有效球里就算被散。旧的 Suppress(secs) 保留为"全图"版（测试 / 兼容用）。
+        public const float SuppressRadius = 12f;
+        class Sup { public Vector3 c; public float r, until; }
+        static readonly List<Sup> sups = new List<Sup>(); static bool anyParticleOff;
+        public static bool Suppressed { get { foreach (var s in sups) if (Time.time < s.until) return true; return false; } }   // 场上有任何散雾在生效
+        public static bool SuppressedAt(Vector3 p)
         {
-            bool was = Suppressed; suppressedUntil = Time.time + secs;
-            foreach (var ps in particles) if (ps != null) { var em = ps.emission; em.enabled = false; }
+            foreach (var s in sups) if (Time.time < s.until && (s.r <= 0 || Vector3.Distance(new Vector3(p.x, 0, p.z), new Vector3(s.c.x, 0, s.c.z)) <= s.r)) return true;
+            return false;
+        }
+        // V18：冰淇淋给火锅降温，热气散开一段时间（全图版：r ≤ 0 = 不限范围）
+        public static bool Suppress(float secs) { return Suppress(Vector3.zero, 0f, secs); }
+        public static bool Suppress(Vector3 center, float radius, float secs)
+        {
+            bool was = SuppressedAt(center);
+            Sup hit = null; foreach (var s in sups) if (s.r == radius && Vector3.Distance(s.c, center) < .5f) hit = s;
+            if (hit == null) sups.Add(hit = new Sup { c = center, r = radius });
+            hit.until = Time.time + secs;
+            foreach (var ps in particles) if (ps != null && SuppressedAt(ps.transform.position)) { var em = ps.emission; em.enabled = false; anyParticleOff = true; }
             return !was;
         }
-        public static void Tick() { if (!Suppressed && suppressedUntil > 0) { suppressedUntil = 0; foreach (var ps in particles) if (ps != null) { var em = ps.emission; em.enabled = true; } } }
+        public static void Tick()
+        {
+            for (int i = sups.Count - 1; i >= 0; i--) if (Time.time >= sups[i].until) sups.RemoveAt(i);
+            if (anyParticleOff) { anyParticleOff = false; foreach (var ps in particles) if (ps != null) { bool off = SuppressedAt(ps.transform.position); var em = ps.emission; em.enabled = !off; anyParticleOff |= off; } }
+        }
         public static void Add(Vector3 c, float r) { clouds.Add(new Vector4(c.x, c.y, c.z, r)); }
         public static bool Blocks(Vector3 a, Vector3 b)
         {
-            Tick(); if (Suppressed) return false;
-            foreach (var c in clouds) if (Hits(c, a, b)) return true;
-            for (int i = 0; i < timed.Count; i++) if (Time.time < timedUntil[i] && Hits(timed[i], a, b)) return true;
+            Tick();
+            foreach (var c in clouds) if (!SuppressedAt(c) && Hits(c, a, b)) return true;
+            for (int i = 0; i < timed.Count; i++) if (Time.time < timedUntil[i] && !SuppressedAt(timed[i]) && Hits(timed[i], a, b)) return true;
             return false;
         }
         static bool Hits(Vector4 c, Vector3 a, Vector3 b)

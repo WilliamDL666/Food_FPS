@@ -357,7 +357,7 @@ namespace NeonSiege
                     Place(cook, new Vector3(8, 1.0f, -35.5f), 0);
                     for (float w = 0; w < 1.2f; w += Time.deltaTime) yield return null;
                     bool burned = cook.hp + cook.armor < 150; Place(cook, new Vector3(50, .05f, 0), -90); cook.hp = 100; cook.armor = 50;   // 离开火锅
-                    bool steamBlocks = !Skills.LineClear(new Vector3(8, 2.2f, -40.5f), new Vector3(8, 2.2f, -30.5f), null) && Skills.LineClear(new Vector3(0, 1.6f, -41f), new Vector3(0, 1.6f, -47f), null);
+                    bool steamBlocks = !Skills.SightClear(new Vector3(8, 2.2f, -40.5f), new Vector3(8, 2.2f, -30.5f), null) && Skills.SightClear(new Vector3(0, 1.6f, -41f), new Vector3(0, 1.6f, -47f), null);
                     var climber = Other(def, 0); var cb = climber.GetComponent<Bot>(); float topY = 0;
                     if (cb != null)
                     {
@@ -425,7 +425,7 @@ namespace NeonSiege
                     bool v18recipes = Ingredients.Recipe("Rice", "Nori") == FoodForm.Onigiri && Ingredients.Recipe("Cheese", "Bread") == FoodForm.Burger && Ingredients.Recipe("Sugar", "Ice") == FoodForm.IceCream && Ingredients.Recipe("HotpotBase", "Chili") == FoodForm.Spicy;
                     SauceZone.Mark(new Vector3(-40, 0, 4), 3f, true); bool v18hotChoco = SauceZone.HotAt(new Vector3(-40, .05f, 4));
                     SauceZone.Mark(new Vector3(-14, 0, -4.5f), 3f, false); bool v18slick = SauceZone.SlickAt(new Vector3(-14, .05f, -4.5f));
-                    SteamCloud.Suppress(2f); bool v18cooled = Skills.LineClear(new Vector3(8, 2.2f, -40.5f), new Vector3(8, 2.2f, -30.5f), null);
+                    SteamCloud.Suppress(2f); bool v18cooled = Skills.SightClear(new Vector3(8, 2.2f, -40.5f), new Vector3(8, 2.2f, -30.5f), null);
                     bool v18repaired = false;
                     if (m.arena.breakWalls.Count > 0)
                     {
@@ -531,6 +531,8 @@ namespace NeonSiege
                 yield return V22Tests();                             // V22 第一期：体力与 UI（M30–M35）
                 yield return V22MapTests();                          // V22 第二期：地图方案甲（M40–M45）
                 yield return V22LinkTests();                         // V22 第三期：干员 × 地图联动 + 团队标记 + 大招预警（M46–M54）
+                if (ToonAssets.Available) yield return V23CombatTests();   // V23 a + c：视线 / 爆炸拆分、曼妥思喷泉、技能 / 大招美食表现（M55–M60）
+                yield return MapUiTests.Run(Check);                  // V23 b：地图 UI + 食材高亮（M70–M76，MapUiTests.cs）
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
 
@@ -1276,6 +1278,8 @@ namespace NeonSiege
             }
             if (p != null) yield return HudShots(dir);   // V22 第一期：状态带 / 冲刺转开火 / 开镜 / 死亡回顾（38–41）
             if (p != null) yield return LinkShots(dir);  // V22 第三期：6 个联动瞬间 + 联动提示 + 标记 + 大招预警（48–57）
+            if (p != null && ToonAssets.Available) yield return V23SkillShots(dir);   // V23 c：6 技能 + 6 大招施放瞬间、曼妥思喷泉、蒸汽里被炸（60–74）
+            if (p != null) yield return MapUiTests.Shots(dir, Grab);   // V23 b：小地图跟随 / 北向、大地图、食材光柱 / 边缘箭头 / 交火变淡（80–86，MapUiTests.cs）
             // V9 menus
             m.ui.preview = 1; for (int f = 0; f < 3; f++) yield return null;
             yield return Grab(System.IO.Path.Combine(dir, "17_main_menu.png"));
@@ -1417,12 +1421,12 @@ namespace NeonSiege
                 valve.ResetRound(); SteamCloud.ClearTimed();
                 var user = Other(att, 0); Place(user, valve.transform.position + new Vector3(-1.3f, .05f, 0), 90); yield return null;
                 Vector3 la = new Vector3(13, 2.2f, 8), lb = new Vector3(21, 2.2f, 8);   // 牌楼侧柜在 x=12，从它东边量
-                clearBefore = Skills.LineClear(la, lb, null);
+                clearBefore = Skills.SightClear(la, lb, null);
                 while (!fired && held < 1.5f) { fired = valve.Hold(user, Time.deltaTime); held += Time.deltaTime; yield return null; }
-                blocks = valve.Active && !Skills.LineClear(la, lb, null);
+                blocks = valve.Active && !Skills.SightClear(la, lb, null);
                 noReuse = !valve.Usable(user);
                 yield return new WaitForSeconds(SteamValve.Duration + .3f);
-                clearAfter = !valve.Active && Skills.LineClear(la, lb, null);
+                clearAfter = !valve.Active && Skills.SightClear(la, lb, null);
                 cdLeft = valve.CooldownLeft; cdOk = cdLeft > SteamValve.Cooldown - SteamValve.Duration - 1.5f && cdLeft < SteamValve.Cooldown - SteamValve.Duration + .5f;
                 valve.ResetRound(); SteamCloud.ClearTimed();
             }
@@ -1647,7 +1651,7 @@ namespace NeonSiege
                 Vector3 pc = potN.transform.position;
                 Place(raven, new Vector3(pc.x, .05f, 48.6f), 180); Place(foe, pc + new Vector3(0, .05f, -3.4f), 0); Place(foeMate, new Vector3(-30, .05f, 30), 0);
                 foe.hp = 100; foe.revealedUntil = 0; yield return new WaitForFixedUpdate(); yield return null;
-                hidden = !Skills.LineClear(raven.Eye, foe.Chest, foe) && !Skills.LineClear(raven.Eye, foe.Head, foe);
+                hidden = !Skills.SightClear(raven.Eye, foe.Chest, foe) && !Skills.SightClear(raven.Eye, foe.Head, foe);
                 Skills.ShootArrow(raven, Skills.ArrowVelocityTo(raven.Eye, pc + Vector3.up * .55f));
                 yield return new WaitForSeconds(.5f);
                 var dr = Links.PotDrone(potN); pot49 = dr != null;
@@ -2262,6 +2266,296 @@ namespace NeonSiege
             if (!HudCaptureEnd.done) { HudCaptureBegin.target = null; HudCaptureEnd.file = null; Debug.LogWarning("NEON_HUD_CAPTURE_NONE guiFrames=" + HudCaptureBegin.guiFrames); Render(cam, file); }
             else Debug.Log("NEON_HUD_CAPTURE " + w + "x" + h + " " + System.IO.Path.GetFileName(file));
             ldr.Release();
+        }
+
+        // ================================================================ V23 a + c：视线 / 爆炸拆分、曼妥思喷泉、技能 / 大招美食表现（设计稿_V23 §2、§4.0、A1、A2，M55–M60）
+        static readonly Role[] V23Roles = { Role.Falcon, Role.Rivet, Role.Ironwall, Role.Raven, Role.Ember, Role.Phantom };
+        static void V23Cleanup()
+        {
+            ClearFire(); Skills.ClearRound(); SteamCloud.ClearTimed();
+            foreach (var rw in Object.FindObjectsOfType<RiceWall>()) Object.Destroy(rw.gameObject);
+            foreach (var jd in Object.FindObjectsOfType<JellyDome>()) Object.Destroy(jd.gameObject);
+            foreach (var cb in Object.FindObjectsOfType<CandleBarrage>()) Object.Destroy(cb.gameObject);
+            foreach (var dc in Object.FindObjectsOfType<DeployedCover>()) Object.Destroy(dc.gameObject);
+            foreach (var sw in Object.FindObjectsOfType<ShieldWall>()) Object.Destroy(sw.gameObject);
+        }
+
+        IEnumerator V23CombatTests()
+        {
+            var m = Match.I; var p = m.player; var ar = m.arena;
+            m.phase = Phase.Live; m.roundClock = Config.RoundTime;
+            if (p == null) { Check("M55", "V23 战斗表现", false, "没有玩家角色"); yield break; }
+            var savedRoles = new Dictionary<Fighter, Role>(); foreach (var f in m.fighters) savedRoles[f] = f.role;
+            FoodTips.AutoEnabled = false; V23Cleanup(); UltWarn.Clear();
+            foreach (var f in m.fighters) Hush(f);
+            int myTeam = p.team, foeTeam = 1 - p.team;
+            Vector3 c = new Vector3(-40, .05f, 4);
+            p.Respawn(new Vector3(-44, .05f, -8), 0); p.scripted = true; Hush(p);
+
+            // ---------------- M55：站在蒸汽里 —— 看不见，但手雷 / 纸杯蛋糕炸得到；冰淇淋散雾只散局部
+            var thrower = Npc(myTeam, 0); var foe = Npc(foeTeam, 0);
+            Hush(thrower); Hush(foe); if (foe.role == Role.Ironwall) foe.ChangeRole(Role.Falcon);   // 铁幕被动爆炸减半，换掉免得干扰读数
+            foe.Respawn(c, 0); Hush(foe); Place(thrower, c + new Vector3(-7, 0, 0), 90);
+            yield return new WaitForFixedUpdate(); yield return null;
+            SteamCloud.ClearTimed(); SteamCloud.AddTimed(foe.Chest, 2.8f, Time.time + 30f);   // 和蒸汽阀同款的限时白雾，罩住目标
+            bool hidden = !Skills.SightClear(thrower.Eye, foe.Chest, foe) && !Skills.SightClear(thrower.Eye, foe.Head, foe);
+            bool blastLine = Skills.BlastClear(c + new Vector3(-2f, .3f, 0), foe.Chest, foe);
+            foe.hp = Config.MaxHp; foe.armor = 0;
+            var gr = Grenade.Throw(thrower, Vector3.zero); gr.transform.position = c + new Vector3(-2f, .3f, 0); gr.Detonate();
+            yield return null;
+            float gDmg = Config.MaxHp - foe.hp;
+            foe.hp = Config.MaxHp; foe.armor = 0; BlastCharge.LastResult = "";
+            var bc = new GameObject("测试纸杯").AddComponent<BlastCharge>(); bc.Init(thrower, c + new Vector3(-1.8f, .1f, 0));
+            yield return new WaitForSeconds(Config.BlastWarning + .12f);
+            float cDmg = Config.MaxHp - foe.hp; string cupResult = BlastCharge.LastResult;
+            bool stillHidden = !Skills.SightClear(thrower.Eye, foe.Chest, foe);
+            ClearFire(); SteamCloud.ClearTimed();
+            Vector3 A = new Vector3(-40, 1.3f, 4), B = new Vector3(-40, 1.3f, 30);
+            SteamCloud.AddTimed(A, 2.8f, Time.time + 30f); SteamCloud.AddTimed(B, 2.8f, Time.time + 30f);
+            SteamCloud.Suppress(A, SteamCloud.SuppressRadius, 1.5f);
+            bool aGone = !SteamCloud.Blocks(A + Vector3.left * 4, A + Vector3.right * 4);
+            bool bStays = SteamCloud.Blocks(B + Vector3.left * 4, B + Vector3.right * 4);
+            yield return new WaitForSeconds(1.7f);
+            bool aBack = SteamCloud.Blocks(A + Vector3.left * 4, A + Vector3.right * 4);
+            SteamCloud.ClearTimed();
+            Check("M55", "视线 / 爆炸拆分：目标站在蒸汽里 → SightClear 看不见，BlastClear 不受蒸汽影响，手雷和纸杯蛋糕都炸得到；冰淇淋散雾只散 " + SteamCloud.SuppressRadius + " m 内的蒸汽（远处的照样挡视线），到期恢复",
+                hidden && stillHidden && blastLine && gDmg > 20f && cDmg > 15f && aGone && bStays && aBack,
+                "看不见=" + hidden + "/" + stillHidden + "，爆炸线通=" + blastLine + "，手雷伤害 " + gDmg.ToString("0") + "，纸杯伤害 " + cDmg.ToString("0") + "（结果字 " + cupResult + "），局部散雾：近处散=" + aGone + " 26 m 外仍挡=" + bStays + " 到期恢复=" + aBack);
+
+            // ---------------- M56：A1 汽水罐手雷炸曼妥思 → 喷泉 + 附近角色被弹起（真实投掷 + 直接引爆 + 冷却 + 超出范围）
+            MentosPile pile = null; foreach (var mp in MentosPile.All) if (mp != null && mp.transform.position.z > 0) pile = mp;
+            if (pile == null) Check("M56", "曼妥思喷泉", false, "MentosPile.All 里没有北侧曼妥思（All=" + MentosPile.All.Count + "）");
+            else
+            {
+                Vector3 pp = pile.transform.position;
+                var blockers = new List<string>();
+                foreach (var col in Physics.OverlapCapsule(pp + Vector3.up * .3f, pp + Vector3.up * 1.6f, 1f, ~0, QueryTriggerInteraction.Ignore))
+                    if (!col.transform.IsChildOf(pile.transform) && col.GetComponentInParent<Fighter>() == null) blockers.Add(col.name);
+                bool hasCol = pile.GetComponentInChildren<Collider>() != null;
+                bool reach = NavMesh.SamplePosition(pp + Vector3.left * 1.5f, out NavMeshHit nh, 1f, NavMesh.AllAreas);
+                var mate = Npc(myTeam, 1); Hush(mate);
+                // 复现 A1：从 8 m 外平直地砸中瓶子（玩家对着曼妥思扔的典型情况）。旧行为（MentosFix=false）vs 修好后
+                float[] hitDist = new float[2]; bool[] hitFount = new bool[2];
+                for (int pass = 0; pass < 2; pass++)
+                {
+                    Grenade.MentosFix = pass == 1; pile.ResetRound();
+                    Place(thrower, pp + new Vector3(-8f, .05f, 0), 90); Place(mate, pp + new Vector3(30f, .05f, 0), -90);
+                    yield return new WaitForFixedUpdate(); yield return null;
+                    int h0 = MentosPile.Fountains;
+                    Vector3 fr = thrower.Eye + thrower.AimDir * .5f + Vector3.down * .15f;
+                    var gh = Grenade.Throw(thrower, Skills.VelocityTo(fr, pp + Vector3.up * .9f, 6f));
+                    Vector3 lastH = gh.transform.position; float wth = 0;
+                    while (gh != null && wth < Grenade.Fuse + 1f) { lastH = gh.transform.position; wth += Time.deltaTime; yield return null; }
+                    hitDist[pass] = Links.Flat(lastH, pp); hitFount[pass] = MentosPile.Fountains > h0;
+                }
+                Grenade.MentosFix = true;
+                pile.ResetRound();
+                Place(thrower, pp + new Vector3(-6f, .05f, 0), 90); Place(mate, pp + new Vector3(1.6f, .05f, 1.2f), -90);
+                yield return new WaitForFixedUpdate(); yield return null;
+                int f0 = MentosPile.Fountains;
+                Vector3 from = thrower.Eye + thrower.AimDir * .5f + Vector3.down * .15f;
+                var g2 = Grenade.Throw(thrower, Skills.VelocityTo(from, pp + new Vector3(-1.3f, 0, 0), 25f));
+                Vector3 last = g2.transform.position; float wt = 0, mateTop = mate.transform.position.y;
+                while (g2 != null && wt < Grenade.Fuse + 1f) { last = g2.transform.position; wt += Time.deltaTime; yield return null; }
+                float landDist = Links.Flat(last, pp);
+                bool fountA = MentosPile.Fountains > f0;
+                for (float t2 = 0; t2 < .5f; t2 += Time.deltaTime) { mateTop = Mathf.Max(mateTop, mate.transform.position.y); yield return null; }
+                bool launched = mateTop > pp.y + 1f;
+                yield return new WaitForSeconds(2.5f);
+                pile.ResetRound(); int f1 = MentosPile.Fountains;
+                var g3 = Grenade.Throw(thrower, Vector3.zero); g3.transform.position = pp + new Vector3(-2.5f, .2f, 0); g3.Detonate(); yield return null;
+                bool fountB = MentosPile.Fountains == f1 + 1;
+                var g4 = Grenade.Throw(thrower, Vector3.zero); g4.transform.position = pp + new Vector3(-2.5f, .2f, 0); g4.Detonate(); yield return null;
+                bool cooldown = MentosPile.Fountains == f1 + 1;
+                pile.ResetRound();
+                var g5 = Grenade.Throw(thrower, Vector3.zero); g5.transform.position = pp + new Vector3(-5.5f, .2f, 0); g5.Detonate(); yield return null;
+                bool farNo = MentosPile.Fountains == f1 + 1;
+                pile.ResetRound();
+                Check("M56", "曼妥思喷泉（A1）：8 m 外平直砸中瓶子 → 修好后必定喷泉（旧行为会被弹出触发圈）；站 6 m 外把汽水罐手雷扔到曼妥思脚下 → 引信结束时喷泉触发、旁边的人被弹起；2.5 m 直接引爆触发；15 s 冷却内不重复；4.5 m 外不触发；瓶子有碰撞、旁边可走到",
+                    hasCol && reach && fountA && launched && fountB && cooldown && farNo && hitFount[1],
+                    "曼妥思 (" + pp.x.ToString("0") + ", " + pp.z.ToString("0.0") + ")，All=" + MentosPile.All.Count + "，瓶子碰撞=" + hasCol + "，1 m 内其它碰撞=[" + string.Join(",", blockers.ToArray()) + "]，NavMesh 可达=" + reach
+                    + "；砸中瓶子：旧行为弹到 " + hitDist[0].ToString("0.0") + " m 外、喷泉=" + hitFount[0] + " → 修好后停在 " + hitDist[1].ToString("0.0") + " m、喷泉=" + hitFount[1] + "；吊射到脚下：手雷停在离瓶子 " + landDist.ToString("0.0") + " m 处，喷泉=" + fountA + "，队友最高 y=" + mateTop.ToString("0.0") + "（被弹起=" + launched + "）；直接引爆=" + fountB + "，冷却=" + cooldown + "，5.5 m 不触发=" + farNo);
+            }
+
+            // ---------------- M57：第一人称左手动作 —— 6 个技能都有、时长 ≤ 锁定时间、"按下即生效"的 4 个技能动作期间枪仍可开火
+            string durs = ""; bool durOk = true, fireOk = true, handMoved = true, anyArm = false; int plays0 = SkillHand.Plays;
+            foreach (var r in V23Roles)
+            {
+                p.ChangeRole(r); p.Respawn(c, 90); p.scripted = true; Hush(p); p.skillCharges = 2;
+                yield return null; yield return new WaitForSeconds(.1f);
+                var parts = p.ViewParts; bool arm = parts != null && parts.armL != null && p.ViewGun != null; anyArm |= arm;
+                Vector3 rest = arm ? p.ViewGun.InverseTransformPoint(parts.armL.position) : Vector3.zero;
+                bool canBefore = p.CanFireNow;
+                Vector3 tgt = p.transform.position + p.AimDir * 6f; if (r == Role.Rivet) Skills.CoverPlacementAt(p, Skills.CoverDesired(p), out tgt, out _); else tgt = Skills.GroundAt(tgt);
+                bool cast = Skills.Cast(p, tgt);
+                float dur = SkillHand.Duration(r), lockT = r == Role.Falcon ? Config.DashWindup : r == Role.Rivet ? Config.CoverDeploy : .4f;
+                if (!cast || dur > lockT + 1e-4f) durOk = false;
+                yield return new WaitForSeconds(dur * .5f);
+                Vector3 mid = arm ? p.ViewGun.InverseTransformPoint(parts.armL.position) : Vector3.zero;
+                float moved = (mid - rest).magnitude;
+                if (arm && moved < .004f) handMoved = false;
+                if (r != Role.Falcon && r != Role.Rivet && canBefore && !p.CanFireNow) fireOk = false;
+                durs += r + " " + dur.ToString("0.00") + "/" + lockT.ToString("0.00") + "s 手移 " + (moved * 100).ToString("0.0") + "cm；";
+                yield return new WaitForSeconds(dur * .5f + .3f);
+                V23Cleanup();
+            }
+            Check("M57", "第一人称左手动作：6 个技能各有一段（汽水罐 / 爆米花机 / 布丁 / 签筒 / 打火机 / 棉花糖棒），时长 ≤ 现有锁定时间（冲刺 0.15、威化 0.6、其余 ≤ 0.4 s），按下即生效的 4 个技能动作期间可以开火",
+                durOk && fireOk && handMoved && SkillHand.Plays >= plays0 + 6,
+                durs + "有第一人称手臂=" + anyArm + "，开火不受影响=" + fireOk);
+
+            // ---------------- M58：生效飘字（结果字 = 遥测有效判定）
+            SkillPop.History.Clear();
+            foe.Respawn(c + new Vector3(4, 0, 0), -90); Hush(foe);
+            var fal = Npc(myTeam, 0); Hush(fal); fal.ChangeRole(Role.Falcon); Place(fal, c, 90); yield return null;
+            Skills.DashFinished(fal); Skills.NotifyDamage(fal, foe, 10f);
+            var cg = new GameObject("测试威化"); cg.transform.position = c + new Vector3(0, 0, -6); var dcv = cg.AddComponent<DeployedCover>(); dcv.Init(fal); yield return null; dcv.TakeDamage(70f, foe, false);
+            var iw = Npc(myTeam, 1); Hush(iw); iw.ChangeRole(Role.Ironwall); Place(iw, c + new Vector3(0, 0, 6), 90); yield return null;
+            ShieldWall sw = null; if (Skills.Cast(iw, iw.transform.position + Vector3.right * 5f)) foreach (var s0 in Object.FindObjectsOfType<ShieldWall>()) if (s0.owner == iw) sw = s0;
+            if (sw != null) sw.TakeDamage(70f, foe, false);
+            var dg = new GameObject("测试芥末签"); dg.transform.position = foe.Chest + Vector3.left * 3f; var dr = dg.AddComponent<Drone>(); dr.Init(fal, dg.transform.position, Vector3.up);
+            var ng = new GameObject("测试棉花糖迷雾"); ng.transform.position = foe.transform.position; ng.AddComponent<NoiseField>().Init(fal); Skills.spawned.Add(ng); Skills.spawned.Add(dg);
+            yield return new WaitForSeconds(Config.DroneScanDelay + .15f);
+            bool choke = GameObject.Find("世界飘字 呛！") != null;
+            yield return new WaitForSeconds(.3f);
+            string hist = string.Join(" / ", SkillPop.History.ToArray());
+            bool popsOk = hist.Contains("续杯！") && hist.Contains("威化挡住了！") && hist.Contains("布丁吃下") && hist.Contains("呛到") && hist.Contains("糊住了！") && cupResult == "生日快乐！";
+            Check("M58", "生效飘字：续杯！/ 威化挡住了！/ 布丁吃下 N 伤害 / 呛到 N 人！（敌人头顶\"呛！\"）/ 生日快乐！/ 糊住了！—— 和 skillEffective 同一判定",
+                popsOk && choke, hist + " / 纸杯=" + cupResult + "，头顶呛字=" + choke);
+            V23Cleanup();
+
+            // ---------------- M59：6 个大招的美食表现（施放瞬间 + 持续 + 结束），规则 / 生效时间不变；镜头反馈受"镜头震动幅度"控制
+            var um = Npc(myTeam, 0); Hush(um); foe.Respawn(c + new Vector3(5, 0, 0), -90); Hush(foe);
+            int casts0 = UltFx.Casts, ends0 = UltFx.Ends; string ultLog = ""; bool rulesOk = true;
+            foreach (var r in V23Roles)
+            {
+                um.ChangeRole(r); Place(um, c, 90); um.pitch = 10f; yield return null;
+                um.Food.ult = 1f; bool fired = um.Food.TryUlt(); bool ok = fired;
+                switch (r)
+                {
+                    case Role.Rivet: { int walls = 0; foreach (var rw in Object.FindObjectsOfType<RiceWall>()) { var bx = rw.GetComponent<BoxCollider>(); if (bx != null && Mathf.Abs(bx.center.y - .7f) < .01f) walls++; } ok &= walls == 3; ultLog += "饭团墙 " + walls + " 面（碰撞第 1 帧就位）；"; break; }
+                    case Role.Ironwall: ok &= Object.FindObjectOfType<JellyDome>() != null; ultLog += "果冻罩=" + ok + "；"; break;
+                    case Role.Raven: ok &= foe.revealedUntil >= Time.time + 4.9f; ultLog += "全图显示 5 s=" + ok + "；"; break;
+                    case Role.Ember: { var cb = Object.FindObjectOfType<CandleBarrage>(); ok &= cb != null && cb.Dropped == 0; ultLog += "蜡烛 0 帧未落=" + ok + "；"; break; }
+                    case Role.Phantom: ok &= UltFx.FrostStorm.Live.Count > 0 && Mathf.Approximately(UltFx.FrostStorm.Life, 6f) && Mathf.Approximately(UltFx.FrostStorm.Radius, 11f); ultLog += "糖霜风暴 11 m / 6 s=" + ok + "；"; break;
+                    default: ultLog += "汉堡冲撞=" + ok + "；"; break;
+                }
+                if (!ok) rulesOk = false;
+                yield return new WaitForSeconds(.35f);
+            }
+            bool castOk = UltFx.Casts == casts0 + 6;
+            yield return new WaitForSeconds(2.2f);   // 汉堡 0.9 s、蜡烛 6 × 0.33 s 结束
+            bool endOk = UltFx.Ends >= ends0 + 2;
+            V23Cleanup();
+            float ss0 = Tune.ShakeScale;
+            p.ChangeRole(Role.Rivet); p.Respawn(c, 90); p.scripted = true; Hush(p); yield return null;
+            Tune.ShakeScale = 0f; p.Food.ult = 1f; p.Food.TryUlt(); yield return null; float pulse0 = p.UltFovPulse;
+            yield return new WaitForSeconds(.8f); V23Cleanup();
+            Tune.ShakeScale = 1f; p.Food.ult = 1f; p.Food.TryUlt(); yield return null; float pulse1 = p.UltFovPulse;
+            Tune.ShakeScale = ss0;
+            Check("M59", "大招美食表现：6 个大招施放都有专属特效 / 音效 / 播报，汉堡与蜡烛轰炸有\"结束\"表现；饭团墙碰撞第 1 帧就位、蜡烛 0 帧未落、全图显示仍 5 s、糖霜风暴 11 m / 6 s（规则不变）；镜头震动幅度 = 0 时没有视野脉冲",
+                castOk && rulesOk && endOk && pulse0 < .01f && pulse1 > .5f,
+                ultLog + "施放表现 " + (UltFx.Casts - casts0) + "/6，结束 " + (UltFx.Ends - ends0) + " 次，视野脉冲：幅度 0 → " + pulse0.ToString("0.00") + "°，幅度 1 → " + pulse1.ToString("0.00") + "°");
+            V23Cleanup();
+
+            // ---------------- M60：新音效 / 图标资源都在（程序合成 / 程序绘制，不引用 FPSRaw）
+            string[] sfx = { "food_can_shake", "food_can_open", "food_burp", "food_wafer_crunch", "food_wafer_shatter", "food_jelly_boing", "food_bamboo_thunk", "food_sneeze", "food_fuse",
+                "food_caramel_bubble", "food_marsh_puff", "food_poprock_loop", "food_burger_chomp", "food_rice_thud", "food_jelly_dome", "food_sushi_radar", "food_candle_whoosh", "food_frost_wind" };
+            var missing = new List<string>(); foreach (var s1 in sfx) if (Sfx.Variants(s1) < 3) missing.Add(s1);
+            int icons = 0; foreach (var r in V23Roles) if (Icons.FoodSkill(r) != null && Icons.Skill(r) == Icons.FoodSkill(r)) icons++;
+            Check("M60", "V23 资源：18 组新合成音效（每组 3 个变体，走 Sfx 分组加载）+ 6 个美食技能图标（Icons.Skill 美食模式返回新图标）",
+                missing.Count == 0 && icons == 6, "缺音效=[" + string.Join(",", missing.ToArray()) + "]，图标 " + icons + "/6");
+
+            // ---------------- 收尾
+            V23Cleanup(); UltWarn.Clear(); FoodTips.AutoEnabled = true; SkillPop.History.Clear();
+            foreach (var mp in MentosPile.All) if (mp != null) mp.ResetRound();
+            foreach (var kv in savedRoles) if (kv.Key.role != kv.Value) kv.Key.ChangeRole(kv.Value);
+            p.scripted = false; Hush(p);
+            foreach (var f in m.fighters) { f.Respawn(ar.SpawnPoint(f.team == m.AttackingTeam, f.slot), 0); Hush(f); }
+            m.roundClock = Config.RoundTime; m.phase = Phase.Live;
+            yield return null;
+        }
+
+        // V23 c 截图（60–74）：6 个技能施放瞬间（第一人称带 HUD）、6 个大招施放瞬间（外部机位）、曼妥思喷泉、蒸汽里被炸
+        IEnumerator V23SkillShots(string dir)
+        {
+            var m = Match.I; var p = m.player; var cam = p.cam != null ? p.cam : Camera.main;
+            if (p == null || cam == null) yield break;
+            HudCaptureBegin.Allow = true;
+            m.phase = Phase.Live; m.roundClock = Config.RoundTime; m.ui.ClearBanner();
+            var savedRoles = new Dictionary<Fighter, Role>(); foreach (var f in m.fighters) savedRoles[f] = f.role;
+            V23Cleanup(); UltWarn.Clear(); FoodTips.AutoEnabled = false;
+            foreach (var f in m.fighters) { Hush(f); if (!f.human) f.Respawn(new Vector3(-60 + f.slot * 2, .05f, f.team == 0 ? -46f : -44f), 0); }
+            int myTeam = p.team, foeTeam = 1 - p.team;
+            System.Action<Vector3, Vector3, float> Ext = (pos, look, fov) => { p.enabled = false; p.SetViewModelVisible(false); cam.transform.SetParent(null); cam.transform.position = pos; cam.transform.LookAt(look); cam.fieldOfView = fov; };
+            System.Action FP = () => { p.enabled = true; p.AttachCamera(); p.SetViewModelVisible(true); };
+            Vector3 c = new Vector3(-40, .05f, 4);
+            var foe = Npc(foeTeam, 0); Hush(foe);
+            string[] names = { "falcon", "rivet", "ironwall", "raven", "ember", "phantom" };
+            for (int i = 0; i < V23Roles.Length; i++)
+            {
+                var r = V23Roles[i];
+                p.ChangeRole(r); p.Respawn(c, 90); p.scripted = true; Hush(p); FP(); p.skillCharges = 2; p.pitch = r == Role.Rivet || r == Role.Phantom ? 8f : 0f;
+                foe.Respawn(c + new Vector3(11, 0, 1.5f), -90); Hush(foe);
+                yield return new WaitForSeconds(.5f);
+                Vector3 aimAt = p.transform.position + p.AimDir * 8f; if (r == Role.Rivet) Skills.CoverPlacementAt(p, Skills.CoverDesired(p), out aimAt, out _); else if (r == Role.Phantom) aimAt = Skills.GroundAt(aimAt);   // 和真人一样用预览落点（贴地）
+                Skills.Cast(p, aimAt);
+                float wait = r == Role.Falcon ? .2f : r == Role.Rivet ? .4f : r == Role.Raven ? .15f : .14f;
+                yield return new WaitForSeconds(wait);
+                yield return Grab(System.IO.Path.Combine(dir, "6" + i + "_skill_" + names[i] + ".png"));
+                yield return new WaitForSeconds(.4f); V23Cleanup();
+            }
+            // 大招：队友在街上放，外部机位从侧前方看
+            var um = Npc(myTeam, 0); Hush(um);
+            for (int i = 0; i < V23Roles.Length; i++)
+            {
+                var r = V23Roles[i];
+                um.ChangeRole(r); um.Respawn(c, 90); Hush(um); um.pitch = 12f;
+                foe.Respawn(c + new Vector3(9, 0, 0), -90); Hush(foe);
+                Vector3 look = r == Role.Phantom || r == Role.Ember ? c + new Vector3(10, 1, 0) : c + new Vector3(2, 1.2f, 0);
+                bool wide = r == Role.Phantom || r == Role.Ember;
+                Ext(wide ? c + new Vector3(1f, 7.5f, -11f) : c + new Vector3(3.5f, 3.2f, -9.5f), wide ? c + new Vector3(8f, 0, 0) : look, wide ? 70 : 62);
+                yield return new WaitForSeconds(.4f);
+                um.yaw = 90; um.pitch = 12f; um.Food.ult = 1f; um.Food.TryUlt();   // 俯角 12° → 大招落点在身前约 7.5 m
+                float wait = r == Role.Rivet ? .3f : r == Role.Ember ? .55f : r == Role.Phantom ? .8f : r == Role.Raven ? .25f : .25f;
+                yield return new WaitForSeconds(wait);
+                yield return Grab(System.IO.Path.Combine(dir, (66 + i) + "_ult_" + names[i] + ".png"));
+                yield return new WaitForSeconds(.5f); m.ui.ClearBanner(); V23Cleanup();
+            }
+            // 72 曼妥思喷泉
+            MentosPile pile = null; foreach (var mp in MentosPile.All) if (mp != null && mp.transform.position.z > 0) pile = mp;
+            if (pile != null)
+            {
+                Vector3 pp = pile.transform.position; pile.ResetRound();
+                var mate = Npc(myTeam, 1); Hush(mate); Place(mate, pp + new Vector3(1.6f, .05f, 1.2f), -90); Place(um, pp + new Vector3(-6, .05f, 0), 90);
+                Ext(pp + new Vector3(-7f, 3f, -7.5f), pp + new Vector3(0, 3f, 0), 70);
+                yield return new WaitForSeconds(.3f);
+                var g = Grenade.Throw(um, Vector3.zero); g.transform.position = pp + new Vector3(-2f, .2f, 0); g.Detonate();
+                yield return new WaitForSeconds(.35f);
+                yield return Grab(System.IO.Path.Combine(dir, "72_mentos_fountain.png"));
+                yield return new WaitForSeconds(2.5f); pile.ResetRound();
+            }
+            // 73 蒸汽里被炸到：敌人站在火锅热气里，汽水罐手雷照样炸到（V23 之前炸不到）
+            HotpotHazard pot = null; foreach (var h in HotpotHazard.All) if (h != null && h.transform.position.z > 0) pot = h;
+            if (pot != null)
+            {
+                Vector3 hp = pot.transform.position;
+                foe.Respawn(hp + new Vector3(1.6f, .05f, 0), -90); Hush(foe); foe.hp = Config.MaxHp; foe.armor = 0;
+                Ext(hp + new Vector3(-3f, 2.4f, -6.5f), hp + new Vector3(1f, 1.4f, 0), 66);
+                yield return new WaitForSeconds(.4f);
+                bool hid = !Skills.SightClear(hp + new Vector3(-6, 1.6f, 0), foe.Chest, foe);
+                var g = Grenade.Throw(um, Vector3.zero); g.transform.position = hp + new Vector3(2.6f, .3f, -1f); g.Detonate();
+                yield return null;
+                SkillPop.World(foe.Eye + Vector3.up * .6f, "蒸汽里也炸到了 -" + Mathf.RoundToInt(Config.MaxHp - foe.hp) + (hid ? "（看不见）" : ""), new Color(1f, .9f, .4f), foe.transform, 2f);
+                yield return new WaitForSeconds(.2f);
+                yield return Grab(System.IO.Path.Combine(dir, "73_steam_blast.png"));
+                yield return new WaitForSeconds(.5f);
+            }
+            // 收尾
+            V23Cleanup(); UltWarn.Clear(); m.ui.ClearBanner(); FoodTips.AutoEnabled = true;
+            foreach (var kv in savedRoles) if (kv.Key.role != kv.Value) kv.Key.ChangeRole(kv.Value);
+            p.scripted = false; Hush(p); FP(); p.Respawn(new Vector3(-44, .05f, 3.5f), 92);
+            HudCaptureBegin.Allow = false;
+            yield return null;
         }
     }
 

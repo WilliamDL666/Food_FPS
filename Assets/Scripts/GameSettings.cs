@@ -11,6 +11,8 @@ namespace NeonSiege
         public static bool DamageNumbers = true;
         public static bool Tips = true;   // V21：首次提示卡（新手提示），默认开启，可在设置里关掉
         public static float EnemyOutline = 1f;
+        public static bool MinimapRotate = true;   // V23 b：小地图跟随视角旋转（拍板 2 乙）；关 = 北向固定
+        public static int IngredientGuide = 0;      // V23 b：食材指引 0 全部 / 1 只小地图 / 2 关
         static bool loaded;
 
         public static void Load()
@@ -24,6 +26,8 @@ namespace NeonSiege
             DamageNumbers = PlayerPrefs.GetInt("ns_dmgnum", 1) == 1;
             EnemyOutline = PlayerPrefs.GetFloat("ns_outline", 1f);
             Tips = PlayerPrefs.GetInt("ns_tips", 1) == 1;
+            MinimapRotate = PlayerPrefs.GetInt("ns_maprot", 1) == 1;
+            IngredientGuide = Mathf.Clamp(PlayerPrefs.GetInt("ns_ingguide", 0), 0, 2);
         }
 
         public static void Save()
@@ -31,6 +35,7 @@ namespace NeonSiege
             PlayerPrefs.SetFloat("ns_sens", Sensitivity); PlayerPrefs.SetFloat("ns_ads", AdsSensitivity);
             PlayerPrefs.SetFloat("ns_fov", Fov); PlayerPrefs.SetFloat("ns_vol", Volume);
             PlayerPrefs.SetInt("ns_quality", Quality); PlayerPrefs.SetInt("ns_dmgnum", DamageNumbers ? 1 : 0); PlayerPrefs.SetFloat("ns_outline", EnemyOutline); PlayerPrefs.SetInt("ns_tips", Tips ? 1 : 0);
+            PlayerPrefs.SetInt("ns_maprot", MinimapRotate ? 1 : 0); PlayerPrefs.SetInt("ns_ingguide", IngredientGuide);
             PlayerPrefs.Save();
             Apply();
         }

@@ -136,7 +136,7 @@ namespace NeonSiege
             foreach (var f in Match.I.fighters)
             {
                 if (!f.alive || f == p || f.avatar == null) continue;
-                bool visible = Skills.LineClear(transform.position, f.Chest, f) || Skills.LineClear(transform.position, f.Head, f);
+                bool visible = Skills.SightClear(transform.position, f.Chest, f) || Skills.SightClear(transform.position, f.Head, f);
                 Material m;
                 if (visible)
                 {

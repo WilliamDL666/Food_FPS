@@ -124,6 +124,14 @@ namespace NeonSiege
         public void Freeze(float t) { freezeUntil = Mathf.Max(freezeUntil, Time.time + t); }
         public float lastDamageAt; public Vector3 lastDamageFrom; public float lastArmorBreakAt = -10;
         public float hitMarkerUntil; public bool hitMarkerKill, hitMarkerHead; public float armorBreakMarkAt = -10; float fovKick;
+        // V23：大招 / 技能的镜头反馈（轻微点头 + 视野脉冲 + 震动），幅度统一乘 Tune.ShakeScale（设置里的"镜头震动幅度"）；AI 不做
+        float ultFov; public float UltFovPulse { get { return ultFov; } }
+        public void ViewNudge(float pitchDeg, float fovAdd, float shake)
+        {
+            if (!human) return;
+            punchPitch -= pitchDeg * Tune.ShakeScale; ultFov = Mathf.Max(ultFov, fovAdd * Tune.ShakeScale);
+            if (shake > 0) Fx.shake = Mathf.Max(Fx.shake, shake);   // Fx.shake 在应用时已乘 ShakeScale
+        }
         public float killBannerUntil; public string killBanner = "";
         public Fighter lastVictim; public bool lastKillHead; public int roundKills; public float hitPunchAt = -10;
         public float lastShotAt = -10f, lastSeenByEnemyAt = -10f;
@@ -545,7 +553,7 @@ namespace NeonSiege
                 if (!e.alive || e.team == team) continue;
                 Vector3 to = e.Chest - Eye; float d = to.magnitude;
                 if (d > bestD || Vector3.Angle(AimDir, to) > 35f) continue;
-                if (!Skills.LineClear(Eye, e.Chest, e)) continue;
+                if (!Skills.SightClear(Eye, e.Chest, e)) continue;
                 best = e; bestD = d;
             }
             if (best == null) return false;
@@ -963,6 +971,7 @@ namespace NeonSiege
             float baseFov = GameSettings.Fov;
             float targetFov = adsK > 0 ? Mathf.Lerp(baseFov, baseFov / W.adsZoom, adsK) : Sliding ? baseFov + Tune.SlideFovAdd : sprinting ? baseFov + Tune.SprintFovAdd : baseFov;
             if (Dashing) targetFov = 92f;
+            ultFov = Mathf.Lerp(ultFov, 0f, Time.deltaTime * 5f); targetFov += ultFov;   // V23：大招视野脉冲
             fovKick = Mathf.Lerp(Mathf.Min(fovKick, 4f), 0, Time.deltaTime * 12f);
             // V22：开镜过程中视野直接跟 adsK（和枪模、散布同一个进度），其它情况保持平滑过渡
             float fovNow = adsK > 0f && adsK < 1f && !Dashing ? targetFov : Mathf.Lerp(cam.fieldOfView, targetFov, Time.deltaTime * 14f);
@@ -1009,7 +1018,9 @@ namespace NeonSiege
             if (viewParts != null && viewParts.armL != null && viewGun != null)   // V22：换弹时左手离开护木往下探（摸弹匣）再回来
             {
                 float rk = IsReloading ? Mathf.Sin(Mathf.Clamp01((ReloadProgress - .15f) / .6f) * Mathf.PI) : 0f;
-                viewParts.armL.position = viewGun.TransformPoint(viewParts.armLRest + new Vector3(-.02f, -.09f, -.04f) * rk);
+                var hand = GetComponent<SkillHand>(); Vector3 skillOff = hand != null ? hand.Offset() : Vector3.zero;   // V23：技能的左手动作（只动左手，枪照常开火）
+                viewParts.armL.position = viewGun.TransformPoint(viewParts.armLRest + new Vector3(-.02f, -.09f, -.04f) * rk + skillOff);
+                if (hand != null) hand.Place(viewGun, viewParts.palmLTarget + skillOff, Quaternion.identity);
             }
             if (viewParts != null && viewParts.mag != null) viewParts.mag.gameObject.SetActive(!IsReloading || ReloadProgress > .55f);
             // Through a magnified optic the weapon model is hidden and the UI draws the scope picture.
