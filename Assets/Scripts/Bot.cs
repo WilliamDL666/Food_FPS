@@ -18,6 +18,9 @@ namespace NeonSiege
             new[] { "B工厂", "南后厨B", "B连廊", "中路B", "南小巷B", "奶油平台B", "B工厂墙洞", "北巷转B" } };
         // V22 第二期：蒸笼门（开着是常态）。攻方遇到关着的门去掀开，4 秒没掀开就改走墙洞；守方关口位开局有一定概率去盖上
         Shutter gateTry; float gateTryStart, gateTouchAt; bool gateGaveUp, wantCloseGate; float valveThinkAt, valveUntil; SteamValve valveTarget;
+        // V23 d：进雾关阀（敌方开的整片蒸汽）/ 守关口开大火 / 幻频糊监控
+        SteamValve closeTarget; float closeUntil, closeThinkAt; readonly HashSet<SteamArea> closeTried = new HashSet<SteamArea>(), closeSeen = new HashSet<SteamArea>(); bool knobUsed, gumUsed;
+        public static float CloseChance = .6f;   // 测试可调成 1
         // V10：狙击高台（只能踩弹射板上去）
         bool nesting; Vector3 nestPad, nestSpot, nestLook; float nestHeight, nestLeaveAfter;
         public bool WantsPad { get { return nesting && f.transform.position.y < nestHeight - 1.5f && FlatDist(nestPad, f.transform.position) < 2f; } }
@@ -91,7 +94,7 @@ namespace NeonSiege
             var m = Match.I;
             target = null; heardAt = -10; corners = new Vector3[0]; usedMed = usedBreaker = false; nesting = false;
             linkGoalUntil = pingGoalUntil = lookHintUntil = 0; emberWall = null; potUsed = false;
-            gateTry = null; gateGaveUp = false; wantCloseGate = false; valveTarget = null;
+            gateTry = null; gateGaveUp = false; wantCloseGate = false; valveTarget = null; closeTarget = null; closeTried.Clear(); knobUsed = gumUsed = false;
             bool marksman = f.W.id == "DMR-3" || f.W.id == "BR-5";
             if (f.team == m.AttackingTeam)
             {
@@ -281,7 +284,18 @@ namespace NeonSiege
         {
             if (f.grenades <= 0 || Time.time < nextGrenadeThink || !Match.I.CanAct) return false;
             nextGrenadeThink = Time.time + 1.5f;
-            if (visible || Time.time - heardAt > 4f) return false;
+            if (visible) return false;
+            // V23 d：敌方开的整片蒸汽里听到人 → 往雾里扔雷（爆炸不受雾影响，是标准反制）
+            if (Time.time - heardAt < 6f)
+                foreach (var a in SteamArea.Live)
+                {
+                    if (a == null || !a.Alive || !a.Blind || a.team == f.team || !a.Inside(lastKnown, 1f)) continue;
+                    float da = FlatDist(a.center, f.transform.position); if (da < 7f || da > 26f || Random.value > .6f) continue;
+                    FaceFlat(lastKnown); f.ThrowGrenade(Skills.VelocityTo(f.Eye, lastKnown, 38f));
+                    if (Match.I.autoplay) Debug.Log("NEON_AI_NADE_STEAM r" + Match.I.round + " " + f.Hero.name);
+                    return true;
+                }
+            if (Time.time - heardAt > 4f) return false;
             float d = FlatDist(lastKnown, f.transform.position);
             if (d < 8f || d > 24f || Random.value > .35f) return false;
             FaceFlat(lastKnown);
@@ -397,11 +411,11 @@ namespace NeonSiege
                 {
                     valveThinkAt = Time.time + 1f;
                     foreach (var v in SteamValve.Valves)
-                        if (v != null && v.Usable(f) && FlatDist(v.transform.position, pos) < 4.5f && Time.time - heardAt < 5f) { valveTarget = v; valveUntil = Time.time + 4f; break; }
+                        if (v != null && !v.Active && v.Usable(f) && FlatDist(v.transform.position, pos) < 4.5f && Time.time - heardAt < 5f) { valveTarget = v; valveUntil = Time.time + 4f; break; }
                 }
                 if (valveTarget != null)
                 {
-                    if (!valveTarget.Usable(f) || Time.time > valveUntil) valveTarget = null;
+                    if (!valveTarget.Usable(f) || valveTarget.Active || Time.time > valveUntil) valveTarget = null;
                     else
                     {
                         Vector3 vp = valveTarget.transform.position;
@@ -410,6 +424,55 @@ namespace NeonSiege
                         AimToward(valveTarget.Anchor, 240f, false);
                         return true;
                     }
+                }
+            }
+            // V23 d：进雾关阀 —— 敌方开的整片蒸汽 32 m 内：每片雾每人决定一次（60%），9 s 内走到走进雾中心关掉（反制，关阀的人自己要走进看不见的地方）
+            if (Match.I.BombCarrier != f && !f.bombBusy)
+            {
+                if (closeTarget == null && Time.time >= closeThinkAt)
+                {
+                    closeThinkAt = Time.time + .8f;
+                    foreach (var v in SteamValve.Valves)
+                    {
+                        if (v == null || !v.Active || v.area == null || v.area.team < 0 || v.area.team == f.team || closeTried.Contains(v.area)) continue;
+                        if (FlatDist(v.transform.position, pos) > 32f) { if (Match.I.autoplay && closeSeen.Add(v.area)) Debug.Log("NEON_AI_CLOSE_FAR r" + Match.I.round + " " + f.Hero.name + " d=" + FlatDist(v.transform.position, pos).ToString("0")); continue; }
+                        closeTried.Add(v.area);
+                        if (Random.value < CloseChance) { closeTarget = v; closeUntil = Time.time + 9f; if (Match.I.autoplay) Debug.Log("NEON_AI_CLOSE r" + Match.I.round + " " + f.Hero.name + " → " + v.Noun); }
+                        break;
+                    }
+                }
+                if (closeTarget != null)
+                {
+                    if (!closeTarget.Active || Time.time > closeUntil) closeTarget = null;
+                    else
+                    {
+                        Vector3 vp = closeTarget.transform.position;
+                        if (FlatDist(vp, pos) > 1.5f) MoveAlong(vp + (pos - vp).normalized * 1.1f, false);
+                        else if (closeTarget.Usable(f)) f.botUse = true;
+                        AimToward(closeTarget.Anchor, 240f, false);
+                        return true;
+                    }
+                }
+            }
+            // V23 d：守关口的 AI 听到攻方逼近关口（5 s 内、30 m 内）→ 开大火，整片蒸汽封住关口视线（每回合一次）
+            if (!Attacker && !knobUsed && !Match.I.Planted && (holdZone == 3 || holdZone == 4) && Time.time - heardAt < 5f)
+                foreach (var k in LinkPlus.Knobs)
+                {
+                    if (k == null || (k.transform.position.z > 0) != (holdZone == 3) || !k.Usable(f) || k.Active) continue;
+                    if (FlatDist(k.transform.position, pos) > 12f || FlatDist(lastKnown, k.transform.position) > 30f) continue;
+                    if (valveTarget != k) { valveTarget = k; valveUntil = Time.time + 4f; if (Match.I.autoplay) Debug.Log("NEON_AI_KNOB r" + Match.I.round + " " + f.Hero.name); }
+                    knobUsed = true; break;
+                }
+            if (valveTarget != null && !Attacker)
+            {
+                if (!valveTarget.Usable(f) || valveTarget.Active || Time.time > valveUntil) valveTarget = null;
+                else
+                {
+                    Vector3 vp = valveTarget.transform.position;
+                    if (FlatDist(vp, pos) > 1.5f) MoveAlong(vp + (pos - vp).normalized * 1.2f, true);
+                    else f.botUse = true;
+                    AimToward(valveTarget.Anchor, 240f, false);
+                    return true;
                 }
             }
             // wall hole on our route: shoot the boarded-up crates, then crawl through
@@ -688,6 +751,24 @@ namespace NeonSiege
                         emberWall = w; emberSide = n; emberAt = Time.time;
                         if (Match.I.autoplay) Debug.Log("NEON_AILINK r" + m.round + " breach-throw " + f.Hero.name);
                         return true;
+                    }
+                    return false;
+                }
+                case Role.Phantom:
+                {
+                    // V23 d 副联动：进攻时 20 m 内有没被糊住的守方监控 → 迷雾扔在监控下面糊住它（每回合一次）
+                    if (gumUsed || !Attacker || m.Planted || Match.Mode != GameMode.Bomb || visible || route == null) return false;
+                    Vector3 goal = route[route.Length - 1];
+                    foreach (var cam in Arena.I.cams)
+                    {
+                        if (cam == null || !cam.Working || LinkPlus.Gummed(cam)) continue;
+                        Vector3 cp = cam.transform.position; float d = FlatDist(cp, pos);
+                        if (d > 20f || d < 3f || FlatDist(cp, goal) > 28f) continue;
+                        Vector3 at = Skills.GroundAt(cp + Vector3.down * .5f);
+                        if (Mathf.Abs(at.y - pos.y) > 2.5f) continue;
+                        FaceFlat(at);
+                        if (Skills.Cast(f, at)) { gumUsed = true; if (Match.I.autoplay) Debug.Log("NEON_AILINK r" + m.round + " gum " + f.Hero.name); return true; }
+                        return false;
                     }
                     return false;
                 }

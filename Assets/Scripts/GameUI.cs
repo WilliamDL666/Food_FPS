@@ -1029,7 +1029,7 @@ namespace NeonSiege
             float rh = lw2.CalcHeight(new GUIContent(rule), rw); GUI.Label(new Rect(rx, y + 278, rw, rh), rule, lw2);
             GUI.Label(new Rect(rx, y + 280 + rh, rw, 34), counter, lw2);
         }
-        public static string HeroLinkText(Role r) { return Links.Name(Links.For(r)) + "：" + Links.HelpRule(r) + " 反制：" + Links.HelpCounter(r); }   // V22 第三期：测试读 H 页联动说明
+        public static string HeroLinkText(Role r) { string side = LinkPlus.SideHelp(r); return Links.Name(Links.For(r)) + "：" + Links.HelpRule(r) + " 反制：" + Links.HelpCounter(r) + (side != null ? "\n副联动 · " + side : ""); }   // V23 d：加副联动   // V22 第三期：测试读 H 页联动说明
 
         void HeroSelect(float W, float H)
         {

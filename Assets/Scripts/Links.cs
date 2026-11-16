@@ -7,19 +7,19 @@ namespace NeonSiege
     // 6 个主联动，每个干员 1 个。原技能本体不变，联动是"在特定地图元素上的第二种用法"。
     // 四条硬约束：有时限（≤ 35 s，回合清空）、至少 2 种反制、同一元素同一时间只有一种联动（先到先得）、不永久改变地图。
     // 顺序和 Role 一一对应：猎隼 / 铆钉 / 铁幕 / 夜鸦 / 焚芯 / 幻频
-    public enum LinkKind { ColaBounce, WaferPatch, JellyCurtain, MustardPot, CakeBreach, CandySteam }
+    public enum LinkKind { ColaBounce, WaferPatch, JellyCurtain, MustardPot, CakeBreach, CandySteam, WaferRamp, SauceIgnite, CamGum }   // V23 d：后 3 个是副联动（铆钉 / 焚芯 / 幻频）
 
     public static class Links
     {
         public static readonly Color Gold = new Color(1f, .8f, .25f);
-        public static readonly string[] Ids = { "cola", "patch", "curtain", "pot", "breach", "steam" };
-        public static readonly int[] Total = new int[6];   // 本次运行累计触发（测试读）
+        public static readonly string[] Ids = { "cola", "patch", "curtain", "pot", "breach", "steam", "ramp", "sauce", "gum" };
+        public static readonly int[] Total = new int[9];   // 本次运行累计触发（测试读）
         public static LinkKind For(Role r) { return (LinkKind)(int)r; }
         public static Role RoleOf(LinkKind k) { return (Role)(int)k; }
 
         // ---------------------------------------------------------------- 文案（气泡 / 预览 / H 页 / 提示卡 / 播报共用，测试直接比字符串）
-        public static string Name(LinkKind k) { switch (k) { case LinkKind.ColaBounce: return "可乐弹射"; case LinkKind.WaferPatch: return "嵌入补洞"; case LinkKind.JellyCurtain: return "果冻门帘"; case LinkKind.MustardPot: return "芥末辣锅"; case LinkKind.CakeBreach: return "开墙"; default: return "棉花糖蒸汽"; } }
-        public static string ElementName(LinkKind k) { switch (k) { case LinkKind.ColaBounce: return "果冻弹床"; case LinkKind.WaferPatch: return "破口"; case LinkKind.JellyCurtain: return "门框"; case LinkKind.MustardPot: return "火锅"; case LinkKind.CakeBreach: return "蛋糕墙"; default: return "蒸汽"; } }
+        public static string Name(LinkKind k) { switch (k) { case LinkKind.WaferRamp: return "威化坡道"; case LinkKind.SauceIgnite: return "点酱"; case LinkKind.CamGum: return "糊监控"; case LinkKind.ColaBounce: return "可乐弹射"; case LinkKind.WaferPatch: return "嵌入补洞"; case LinkKind.JellyCurtain: return "果冻门帘"; case LinkKind.MustardPot: return "芥末辣锅"; case LinkKind.CakeBreach: return "开墙"; default: return "棉花糖蒸汽"; } }
+        public static string ElementName(LinkKind k) { switch (k) { case LinkKind.WaferRamp: return "高台边"; case LinkKind.SauceIgnite: return "酱料地面"; case LinkKind.CamGum: return "守方监控"; case LinkKind.ColaBounce: return "果冻弹床"; case LinkKind.WaferPatch: return "破口"; case LinkKind.JellyCurtain: return "门框"; case LinkKind.MustardPot: return "火锅"; case LinkKind.CakeBreach: return "蛋糕墙"; default: return "蒸汽"; } }
         // 世界气泡里的联动行（≤ 18 字，只给能联动的英雄看）
         public static string Bubble(LinkKind k)
         {
@@ -30,49 +30,61 @@ namespace NeonSiege
                 case LinkKind.JellyCurtain: return "★ 布丁盾嵌门框 → 果冻门帘";
                 case LinkKind.MustardPot: return "★ 签子射进锅 → 芥末辣锅";
                 case LinkKind.CakeBreach: return "★ 纸杯粘墙上 → 炸出门洞";
-                default: return "★ 迷雾罩蒸汽 → 不透明烟";
+                case LinkKind.WaferRamp: return "★ 威化墙对准台边 → 坡道";
+                case LinkKind.SauceIgnite: return "★ 纸杯炸酱料 → 点着它";
+                case LinkKind.CamGum: return "★ 迷雾罩监控 → 糊住它";
+                default: return "★ 迷雾罩蒸汽 → 整片粉雾";
             }
         }
-        public static string Bubble(Role r, LinkKind element) { return For(r) == element ? Bubble(element) : null; }
+        public static string Bubble(Role r, LinkKind element) { return For(r) == element || LinkPlus.SideFor(r) == (int)element ? Bubble(element) : null; }
         // 预览 / 组合提示上的结果字
         public static string Result(LinkKind k)
         {
             switch (k)
             {
-                case LinkKind.ColaBounce: return "可乐弹射 · 飞远 ×" + Config.DashPadBoost.ToString("0.##");
+                case LinkKind.ColaBounce: return "可乐弹射 · 飞远 ×" + Config.DashPadBoost.ToString("0.##") + " · 落地炸开 " + Config.ColaImpactRadius.ToString("0.#") + " m";
+                case LinkKind.WaferRamp: return "威化坡道 · " + Config.WaferRampLife.ToString("0") + " 秒";
+                case LinkKind.SauceIgnite: return "点酱 · 黄油着火 / 热巧克力";
+                case LinkKind.CamGum: return "糊监控 · 迷雾期间失效";
                 case LinkKind.WaferPatch: return "嵌入补洞 · " + Config.CoverPatchLife.ToString("0") + " 秒";
                 case LinkKind.JellyCurtain: return "果冻门帘 · " + Config.ShieldDockLife.ToString("0") + " 秒";
-                case LinkKind.MustardPot: return "芥末辣锅 · " + Config.MustardPotLife.ToString("0") + " 秒";
-                case LinkKind.CakeBreach: return "开墙 · 炸出门洞";
-                default: return "棉花糖蒸汽 · 挡视线";
+                case LinkKind.MustardPot: return "芥末辣锅 · " + Config.MustardPotRadius.ToString("0") + " m 呛雾 " + Config.MustardPotLife.ToString("0") + " 秒";
+                case LinkKind.CakeBreach: return "开墙 · 炸出 " + (Config.BlastWallDoorHalf * 2).ToString("0.0") + " m 大门";
+                default: return "棉花糖蒸汽 · 整片粉雾";
             }
         }
         public static string Combo(Role r) { var k = For(r); return ElementName(k) + " + " + Config.Hero(r).skill.Name + " → " + Name(k); }
+        public static string Combo(Role r, LinkKind k) { return ElementName(k) + " + " + Config.Hero(r).skill.Name + " → " + Name(k); }
         public static string HelpRule(Role r)
         {
             switch (r)
             {
-                case Role.Falcon: return "汽水冲刺途中（或冲完 " + Config.DashPadWindow.ToString("0.##") + " 秒内）踩到果冻弹床：沿冲刺方向弹出去，水平距离 ×" + Config.DashPadBoost.ToString("0.##") + "；落地冒一圈可乐泡沫（25 m 能听到）";
+                case Role.Falcon: return "汽水冲刺途中（或冲完 " + Config.DashPadWindow.ToString("0.##") + " 秒内）踩到果冻弹床：沿冲刺方向弹出去，水平距离 ×" + Config.DashPadBoost.ToString("0.##") + "（落点一定在能走的地面上，太远会自动截短）；落地「可乐炸罐」：" + Config.ColaImpactRadius.ToString("0.#") + " m 内的敌人被冲开、准星晃 " + Config.ColaImpactShake.ToString("0.#") + " 秒，不掉血";
                 case Role.Rivet: return "预览贴近被打开的蛋糕墙破口 / 墙洞（" + Config.CoverPatchSnap.ToString("0.#") + " m 内）会变金色吸附：威化墙嵌进破口，耐久不变，存在 " + Config.CoverPatchLife.ToString("0") + " 秒（部署 " + Config.CoverPatchDeploy.ToString("0.0") + " 秒）。每人同时 1 块；开局就有的入口仍然不能封";
-                case Role.Ironwall: return "面向 " + Config.ShieldDockRange.ToString("0") + " m 内开着的门框（≤ " + Config.ShieldDockMaxWidth.ToString("0") + " m 宽：蒸笼门、连廊卷帘门、B 侧门）按 F：布丁盾嵌进门框变成果冻门帘，你可以走开。承伤 " + (Config.ShieldHp * Config.ShieldDockHpMult).ToString("0") + "、" + Config.ShieldDockLife.ToString("0") + " 秒；子弹手雷都挡，人能穿过但速度 ×" + Config.ShieldDockPassSlow.ToString("0.0#");
-                case Role.Raven: return "芥末签射进火锅 / 关东煮锅：不扫描，改成 " + Config.MustardPotRadius.ToString("0") + " m 黄绿辣雾 " + Config.MustardPotLife.ToString("0") + " 秒，雾里的敌人一直透墙可见（不需要视线），离开后再亮 " + Config.MustardPotLinger.ToString("0") + " 秒";
-                case Role.Ember: return "纸杯蛋糕直接粘在蛋糕墙上：爆炸时落点正下方必定炸出 ≥ " + (Config.BlastWallDoorHalf * 2).ToString("0.0") + " × " + Config.BlastWallDoorHeight.ToString("0.0") + " m 的门洞（伤害和焦糖火不变）";
-                default: return "棉花糖迷雾罩住蒸汽源（火锅 / 关东煮热气、正在喷的蒸汽阀）：蒸汽中心 " + Config.CandySteamRadius.ToString("0") + " m 变成不透明的棉花糖蒸汽，" + Config.CandySteamLife.ToString("0") + " 秒（不超过迷雾剩余时间）";
+                case Role.Ironwall: return "面向 " + Config.ShieldDockRange.ToString("0") + " m 内开着的门框（≤ " + Config.ShieldDockMaxWidth.ToString("0") + " m 宽：蒸笼门、连廊卷帘门、B 侧门）按 F：布丁盾嵌进门框变成果冻门帘，你可以走开。承伤 " + (Config.ShieldHp * Config.ShieldDockHpMult).ToString("0") + "、" + Config.ShieldDockLife.ToString("0") + " 秒；子弹手雷都挡，人能穿过但速度 ×" + Config.ShieldDockPassSlow.ToString("0.0#") + "；穿过的敌人「果冻粘身」，透墙可见 " + Config.JellyStickTime.ToString("0.#") + " 秒。每个包点至少留 2 个入口挂不上";
+                case Role.Raven: return "芥末签射进火锅 / 关东煮锅 / 回血炉：不扫描，改成 " + Config.MustardPotRadius.ToString("0") + " m 芥末呛雾（回血炉 " + (Config.MustardPotRadius * Config.MustardStationMul).ToString("0") + " m）" + Config.MustardPotLife.ToString("0") + " 秒，" + Config.MustardSpread.ToString("0.##") + " 秒扩散到最大；雾里的敌人一直透墙可见（芥末味穿透蒸汽）、移速 ×" + Config.MustardSlow.ToString("0.00") + "，离开后再亮 " + Config.MustardPotLinger.ToString("0") + " 秒";
+                case Role.Ember: return "纸杯蛋糕直接粘在蛋糕墙上：爆炸时落点正下方必定炸出约 " + (Config.BlastWallDoorHalf * 2).ToString("0.0") + " × " + Config.BlastWallDoorHeight.ToString("0.0") + " m 的大门（两人并排），洞口扬起 " + Config.CakeDustLife.ToString("0.#") + " 秒蛋糕粉尘挡视线（伤害和焦糖火不变）";
+                default: return "棉花糖迷雾罩住蒸汽源（火锅 / 关东煮热气、正在喷的蒸汽阀 / 开大火）：那一片变成整片粉色棉花糖蒸汽（" + Config.SteamAreaMid.ToString("0") + " m，和整片蒸汽一样大，外面看不进），里面的敌人黏脚，最长 " + Config.CandySteamLife.ToString("0") + " 秒（不超过迷雾剩余时间）。全图最多 " + Config.SteamAreaMax + " 片盲区";
             }
         }
         public static string HelpCounter(Role r)
         {
             switch (r)
             {
-                case Role.Falcon: return "落点固定可以预瞄；空中不能变向；开罐声 40 m";
+                case Role.Falcon: return "落点固定可以预瞄；空中不能变向；开罐声 40 m；炸罐不掉血，站开 " + Config.ColaImpactRadius.ToString("0.#") + " m 就推不动";
                 case Role.Rivet: return "纸杯蛋糕 ×2 + 持续火力；部署 0.9 秒能打断；30 秒后自己消失";
-                case Role.Ironwall: return "纸杯蛋糕 ×2；直接挤过去（会变慢）；绕别的门；11 秒后化掉";
-                case Role.Raven: return "离开火锅 6 m；棉花糖迷雾里不会被标记；冰淇淋打火锅散热气；一枪打掉签子";
-                case Role.Ember: return "铆钉嵌入补洞、BR-5 奶油补墙；听滋滋声离开红圈";
-                default: return "冰淇淋打火锅散热气（一起散）；提前拧掉蒸汽阀；绕到雾外";
+                case Role.Ironwall: return "纸杯蛋糕 ×2；绕别的门；粘身只有 " + Config.JellyStickTime.ToString("0.#") + " 秒，穿过去马上换位；11 秒后化掉";
+                case Role.Raven: return "离开呛雾（" + Config.MustardPotRadius.ToString("0") + " m，冲出去约 2 秒）；棉花糖迷雾盖住芥末味；冰淇淋打火锅散掉；一枪打掉签子";
+                case Role.Ember: return "铆钉嵌入补洞（宽度跟洞走）、BR-5 奶油补墙；听滋滋声提前架洞口";
+                default: return "往雾里扔手雷 / 纸杯（爆炸不受雾影响）；走进去关阀；冰淇淋打火锅局部散雾；绕到雾外";
             }
         }
-        public static string TipBody(Role r) { return Combo(r) + "：" + Result(For(r)) + "。看到金色 ★ 气泡、技能图标变金就能联动，H 帮助里有详细规则"; }
+        public static string TipBody(Role r)
+        {
+            int side = LinkPlus.SideFor(r);
+            return Combo(r) + "：" + Result(For(r)) + (side >= 0 ? "；副联动 " + Combo(r, (LinkKind)side) : "") + "。看到金色 ★ 气泡、技能图标变金就能联动，H 帮助里有详细规则";
+        }
+        public static string SideTip(Role r) { int side = LinkPlus.SideFor(r); return side < 0 ? null : Combo(r, (LinkKind)side) + "：" + Result((LinkKind)side) + "。" + LinkPlus.SideHelp(r); }
 
         // ---------------------------------------------------------------- 工具
         public static float Flat(Vector3 a, Vector3 b) { a.y = b.y = 0; return Vector3.Distance(a, b); }
@@ -161,7 +173,7 @@ namespace NeonSiege
                 Vector3 to = fr.center - pos; float dy = to.y; to.y = 0; float d = to.magnitude;
                 if (d > Config.ShieldDockRange || Mathf.Abs(dy) > 1.5f) continue;
                 if (d > 1.2f && Vector3.Angle(fwd, to) > 55f) continue;
-                if (!fr.open || CurtainOf(fr) != null) { busy = fr; continue; }
+                if (!fr.open || CurtainOf(fr) != null || !LinkPlus.CurtainAllowed(fr)) { busy = fr; continue; }   // V23 d：入口保底，包点至少留 2 个常规入口
                 if (d < bd) { bd = d; best = fr; }
             }
             return best;
@@ -177,17 +189,24 @@ namespace NeonSiege
         }
 
         // ---------------------------------------------------------------- 火锅（夜鸦）
-        public static HotpotHazard PotAt(Vector3 p)
+        // V23 d：火锅 / 关东煮锅 / 火锅回血炉（回血炉半径减半）
+        public static Component PotAt(Vector3 p)
         {
             foreach (var h in HotpotHazard.All)
             {
                 if (h == null) continue; Vector3 c = h.transform.position;
                 if (Flat(p, c) <= 2f && p.y - c.y <= 2.6f && p.y - c.y >= -.5f) return h;
             }
+            foreach (var k in LinkPlus.HealPots())
+            {
+                Vector3 c = k.transform.position;
+                if (Flat(p, c) <= 1.4f && p.y - c.y <= 2.2f && p.y - c.y >= -.3f) return k;
+            }
             return null;
         }
-        public static Drone PotDrone(HotpotHazard h) { foreach (var d in Drone.Live) if (d != null && d.pot == h) return d; return null; }
-        public static bool PotBusy(HotpotHazard h) { return PotDrone(h) != null; }
+        public static float PotRadius(Component pot) { return pot is KitchenStation ? Config.MustardPotRadius * Config.MustardStationMul : Config.MustardPotRadius; }
+        public static Drone PotDrone(Component h) { foreach (var d in Drone.Live) if (d != null && d.pot != null && d.pot == h) return d; return null; }
+        public static bool PotBusy(Component h) { return PotDrone(h) != null; }
         // p 点被"team 的敌方"放的棉花糖迷雾罩住
         public static bool EnemyNoiseCovers(Vector3 p, int team)
         {
@@ -195,14 +214,15 @@ namespace NeonSiege
                 if (n != null && n.owner != null && n.owner.team != team && Flat(p, n.transform.position) <= Config.NoiseRadius) return true;
             return false;
         }
-        public static GameObject MustardFog(Vector3 at)
+        public static GameObject MustardFog(Vector3 at) { return MustardFog(at, Config.MustardPotRadius); }
+        public static GameObject MustardFog(Vector3 at, float R)
         {
-            var go = new GameObject("芥末辣锅"); go.transform.position = at;
-            float R = Config.MustardPotRadius;
+            var go = new GameObject("芥末呛雾"); go.transform.position = at;
             // 地面黄绿辣雾（LINK-4）
             var ps = new GameObject("辣雾").AddComponent<ParticleSystem>(); ps.transform.SetParent(go.transform, false); ps.transform.localPosition = Vector3.up * .4f;
             var main = ps.main; main.startLifetime = new ParticleSystem.MinMaxCurve(1.8f, 3f); main.startSpeed = new ParticleSystem.MinMaxCurve(.2f, .7f); main.startSize = new ParticleSystem.MinMaxCurve(1.4f, 2.8f);
-            main.startColor = new Color(.75f, 1f, .25f, .42f); main.maxParticles = 260; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;
+            main.startColor = new Color(.75f, 1f, .25f, .45f); main.maxParticles = 700; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;
+            main.startSize = new ParticleSystem.MinMaxCurve(1.8f, 3.4f);   // V23 d：齐腰高的浓黄绿雾
             var em = ps.emission; em.rateOverTime = 70;
             var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Circle; sh.radius = R * .85f; sh.rotation = new Vector3(-90, 0, 0);
             var col = ps.colorOverLifetime; col.enabled = true; var g = new Gradient();
@@ -217,6 +237,7 @@ namespace NeonSiege
             ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .12f; ring.startColor = ring.endColor = Skills.Mustard; ring.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             Skills.Circle(ring, Skills.GroundAt(at + Vector3.up), R);
             var l = new GameObject("辣雾光").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up * 1.5f; l.color = Skills.Mustard; l.range = R * 1.6f; l.intensity = 2.2f;
+            var gr = go.AddComponent<MustardGrow>(); gr.R = R; gr.born = Time.time; gr.ps = ps; gr.ring = ring; gr.ground = Skills.GroundAt(at + Vector3.up);   // 1.75 s 从锅口扩散到最大
             Skills.spawned.Add(go);
             return go;
         }
@@ -228,7 +249,7 @@ namespace NeonSiege
             var l = new List<Steam>();
             // V23：冰淇淋散热气改局部，只剔除被散掉的那些蒸汽源
             foreach (var h in HotpotHazard.All) if (h != null && !SteamCloud.SuppressedAt(h.SteamCenter)) l.Add(new Steam { key = h, center = h.SteamCenter, name = h.name.Contains("关东煮") ? "关东煮热气" : "火锅热气" });
-            foreach (var v in SteamValve.Valves) if (v != null && v.Active && !SteamCloud.SuppressedAt(v.CloudCenter)) l.Add(new Steam { key = v, center = v.CloudCenter, name = v.transform.position.x < 5f ? "后厨蒸汽阀" : "蒸汽阀" });
+            foreach (var v in SteamValve.Valves) if (v != null && v.Active && !SteamCloud.SuppressedAt(v.CloudCenter)) l.Add(new Steam { key = v, center = v.CloudCenter, name = v is HotpotKnob ? "开大火的火锅" : v.transform.position.x < 5f ? "后厨蒸汽阀" : "蒸汽阀" });
             return l;
         }
         public static bool SteamNear(Vector3 p, float r, out Steam s)
@@ -248,11 +269,13 @@ namespace NeonSiege
                 if (Flat(s.center, n.transform.position) > Config.NoiseRadius + .5f) continue;
                 n.candyDone.Add(s.key);
                 if (CandySteam.Active(s.key)) continue;
-                CandySteam.Spawn(s.key, s.center, Mathf.Min(Time.time + Config.CandySteamLife, until));
-                Trigger(LinkKind.CandySteam, n.owner, s.center, s.name + "被棉花糖罩住 · 变成看不穿的棉花糖蒸汽");
+                var cs = CandySteam.Spawn(s.key, s.center, Mathf.Min(Time.time + Config.CandySteamLife, until), n.owner);
+                if (cs == null) { if (n.owner.human && Match.I != null) Match.I.Feed("全图已经有 " + Config.SteamAreaMax + " 片盲区 · 这团蒸汽没变成棉花糖蒸汽", Marsh2); continue; }
+                Trigger(LinkKind.CandySteam, n.owner, s.center, s.name + "被棉花糖罩住 · 整片粉色棉花糖蒸汽（" + cs.area.R.ToString("0") + " m）");
             }
         }
 
+        static readonly Color Marsh2 = new Color(1f, .62f, .92f);
         // ---------------------------------------------------------------- 可乐弹射（猎隼）
         public static float LastColaDist = -1;
         public static Vector3 ColaLaunch(Fighter f, JumpPad pad, Vector3 v)
@@ -262,10 +285,12 @@ namespace NeonSiege
             if (wasDashing) { f.dashUntil = Time.time; Skills.DashFinished(f); }
             Vector3 h = new Vector3(v.x, 0, v.z), dir = f.lastDashDir; dir.y = 0;
             if (dir.sqrMagnitude < .01f) dir = h.normalized; dir.Normalize();
-            Vector3 nv = dir * h.magnitude * Config.DashPadBoost + Vector3.up * v.y;   // 水平方向改成冲刺方向，水平速度 ×DashPadBoost（滞空时间不变 → 水平距离 ×DashPadBoost）
+            // V23 d：落点必须在 NavMesh 上，否则把倍率往下截到最远可落点
+            float boost = LinkPlus.ColaBoost(f.transform.position, dir, h.magnitude, v.y); LinkPlus.LastColaBoost = boost;
+            Vector3 nv = dir * h.magnitude * boost + Vector3.up * v.y;   // 水平方向改成冲刺方向，水平速度 ×DashPadBoost（滞空时间不变 → 水平距离 ×DashPadBoost）
             var cf = f.GetComponent<ColaFlight>() ?? f.gameObject.AddComponent<ColaFlight>(); cf.Begin(f.transform.position);
             Fx.Burst(pad.transform.position + Vector3.up * .3f, Vector3.up, Skills.Cola, 40, 8f, .14f, .7f, .3f);
-            Trigger(LinkKind.ColaBounce, f, pad.transform.position + Vector3.up * .5f, "沿冲刺方向弹出去 · 水平 ×" + Config.DashPadBoost.ToString("0.##"));
+            Trigger(LinkKind.ColaBounce, f, pad.transform.position + Vector3.up * .5f, "沿冲刺方向弹出去 · 水平 ×" + boost.ToString("0.##") + " · 落地可乐炸罐");
             return nv;
         }
 
@@ -292,7 +317,7 @@ namespace NeonSiege
         static void Sound(LinkKind k, Vector3 at)
         {
             // 每种联动一个专属音：同一个"叮"（铃声，音高按联动区分）+ 一层美食音
-            float[] bell = { 1.5f, 1.15f, .9f, 1.35f, .75f, 1.7f };
+            float[] bell = { 1.5f, 1.15f, .9f, 1.35f, .75f, 1.7f, 1.05f, .65f, 1.85f };
             Sfx.Play("impactBell_heavy", at, .55f, bell[(int)k], 1f, 45f);
             switch (k)
             {
@@ -301,6 +326,9 @@ namespace NeonSiege
                 case LinkKind.JellyCurtain: Sfx.Play("food_boing", at, 1f, .45f, 1f, 40f); Sfx.Play("food_cream", at, .8f, .9f, 1f, 30f); break;
                 case LinkKind.MustardPot: Sfx.Play("food_fizz", at, .9f, .5f, 1f, 40f); Sfx.Play("maximize", at, .7f, .7f, 1f, 40f); break;
                 case LinkKind.CakeBreach: Sfx.Play("food_confetti", at, 1f, .8f, 1f, 50f); Sfx.Play("impactPlate_heavy", at, .8f, .7f, 1f, 45f); break;
+                case LinkKind.WaferRamp: Sfx.Play("food_wafer_crunch", at, 1f, .8f, 1f, 40f); Sfx.Play("confirmation", at, .6f, 1.1f, 1f, 30f); break;
+                case LinkKind.SauceIgnite: Sfx.Play("food_caramel_bubble", at, 1f, .8f, 1f, 40f); Sfx.Play("thrusterFire", at, .5f, .7f, 1f, 35f); break;
+                case LinkKind.CamGum: Sfx.Play("food_marsh_puff", at, 1f, .8f, 1f, 35f); Sfx.Play("food_squish", at, .8f, .6f, 1f, 30f); break;
                 default: Sfx.Play("food_squish", at, 1f, .5f, 1f, 40f); Sfx.Play("engineCircular", at, .5f, .6f, 1f, 35f); break;
             }
             LastSound = "impactBell_heavy@" + bell[(int)k];
@@ -327,6 +355,7 @@ namespace NeonSiege
                     break;
                 case Role.Rivet:
                     if (PatchTarget(f, Skills.CoverDesired(f), out var br, out bool busy)) { a.any = true; a.ok = !busy; a.at = br.center; }
+                    else if (LinkPlus.RampTarget(f, Skills.CoverDesired(f), out var rs, out bool rb)) { a.any = true; a.ok = !rb; a.at = rs.top; a.kind = LinkKind.WaferRamp; }   // V23 d 副联动
                     break;
                 case Role.Ironwall:
                 {
@@ -347,18 +376,24 @@ namespace NeonSiege
                     var pts = new List<Vector3>();
                     Vector3 hp = Skills.Simulate(f.Eye + f.AimDir * .5f, Skills.ThrowVelocity(f, 15f), pts, 1f, out Collider c);
                     if (c != null && c.GetComponent<WallPiece>() != null) { a.any = a.ok = true; a.at = hp; }
+                    else if (LinkPlus.SauceAt(hp, .8f) >= 0) { a.any = a.ok = true; a.at = hp; a.kind = LinkKind.SauceIgnite; }   // V23 d 副联动
                     break;
                 }
                 default:
-                    if (SteamNear(Skills.GroundPoint(f, 22f), Config.NoiseRadius + .5f, out var st)) { a.any = a.ok = true; a.at = st.center; }
+                {
+                    Vector3 gp = Skills.GroundPoint(f, 22f);
+                    if (SteamNear(gp, Config.NoiseRadius + .5f, out var st)) { a.any = true; a.ok = CandySteam.Active(st.key) || SteamArea.CanSpawnBlind || st.key is SteamValve; a.at = st.center; }
+                    else if (Arena.I != null && (Match.I == null || f.team != Match.I.DefendingTeam))
+                        foreach (var cam in Arena.I.cams) if (cam != null && cam.Working && Flat(cam.transform.position, gp) <= Config.NoiseRadius + .5f) { a.any = true; a.ok = !LinkPlus.Gummed(cam); a.at = cam.transform.position; a.kind = LinkKind.CamGum; break; }   // V23 d 副联动
                     break;
+                }
             }
-            a.text = !a.any ? null : a.ok ? Result(a.kind) : "已被占用 · 同一处同时只能有一个联动";
+            a.text = !a.any ? null : a.ok ? Result(a.kind) : a.kind == LinkKind.CandySteam ? "全图已有 " + Config.SteamAreaMax + " 片盲区" : a.kind == LinkKind.JellyCurtain ? "已被占用 · 或包点只剩 2 个入口" : "已被占用 · 同一处同时只能有一个联动";
             return a;
         }
 
         // ---------------------------------------------------------------- 世界里的联动点（气泡 / 小地图星标 / 首次提示卡）
-        public class Element { public Object key; public Vector3 pos; public float h; public string label; public bool interact; }
+        public class Element { public Object key; public Vector3 pos; public float h; public string label; public bool interact, side; }
         static int elFrame = -1; static Role elRole; static readonly List<Element> elCache = new List<Element>();
         public static List<Element> ElementsFor(Role r)
         {
@@ -368,13 +403,23 @@ namespace NeonSiege
             switch (r)
             {
                 case Role.Falcon: foreach (var p in JumpPad.All) if (p != null) elCache.Add(new Element { key = p, pos = p.transform.position, h = 1.8f, label = line }); break;
-                case Role.Rivet: foreach (var b in Breaches()) if (PatchOf(b) == null) elCache.Add(new Element { key = b.key, pos = b.center, h = b.height + .7f, label = line }); break;
+                case Role.Rivet:
+                    foreach (var b in Breaches()) if (PatchOf(b) == null) elCache.Add(new Element { key = b.key, pos = b.center, h = b.height + .7f, label = line });
+                    foreach (var rs in LinkPlus.Ramps) if (rs.ramp == null && rs.key != null) elCache.Add(new Element { key = rs.key, pos = rs.top, h = 1.4f, label = Bubble(LinkKind.WaferRamp), side = true });
+                    break;
                 case Role.Ironwall: foreach (var fr in Frames()) elCache.Add(new Element { key = fr.key, pos = fr.center, h = fr.height + .6f, label = line, interact = fr.key is Interactable }); break;
-                case Role.Raven: foreach (var h in HotpotHazard.All) if (h != null) elCache.Add(new Element { key = h, pos = h.transform.position, h = 3.4f, label = line }); break;
-                case Role.Ember: if (Arena.I != null) foreach (var w in Arena.I.breakWalls) if (w != null) elCache.Add(new Element { key = w, pos = w.transform.position, h = w.Height + .6f, label = line }); break;
+                case Role.Raven:
+                    foreach (var h in HotpotHazard.All) if (h != null) elCache.Add(new Element { key = h, pos = h.transform.position, h = 3.4f, label = line });
+                    foreach (var k in LinkPlus.HealPots()) elCache.Add(new Element { key = k, pos = k.transform.position, h = 2.6f, label = line, interact = true });
+                    break;
+                case Role.Ember:
+                    if (Arena.I != null) foreach (var w in Arena.I.breakWalls) if (w != null) elCache.Add(new Element { key = w, pos = w.transform.position, h = w.Height + .6f, label = line });
+                    foreach (var g in LinkPlus.SauceMarks) if (g != null) elCache.Add(new Element { key = g, pos = g.transform.position, h = 1.1f, label = Bubble(LinkKind.SauceIgnite), side = true });
+                    break;
                 default:
                     foreach (var h in HotpotHazard.All) if (h != null) elCache.Add(new Element { key = h, pos = h.transform.position, h = 3.4f, label = line });
                     foreach (var v in SteamValve.Valves) if (v != null) elCache.Add(new Element { key = v, pos = v.transform.position, h = 2.3f, label = line, interact = true });
+                    if (Arena.I != null) foreach (var c in Arena.I.cams) if (c != null && c.Working) elCache.Add(new Element { key = c, pos = c.transform.position + Vector3.down * 1.2f, h = 1.8f, label = Bubble(LinkKind.CamGum), side = true });
                     break;
             }
             return elCache;
@@ -385,62 +430,33 @@ namespace NeonSiege
             if (p == null) return null;
             if (p.role == Role.Ironwall && it is Shutter s && s.Width <= Config.ShieldDockMaxWidth + .01f) return Bubble(LinkKind.JellyCurtain);
             if (p.role == Role.Phantom && it is SteamValve) return Bubble(LinkKind.CandySteam);
+            if (p.role == Role.Raven && it is KitchenStation k && k.kind == KitchenStation.Kind.HotpotHeal) return Bubble(LinkKind.MustardPot);   // V23 d：回血炉也能射芥末签
             return null;
         }
     }
 
-    // ================================================================ 棉花糖蒸汽：迷雾 ∩ 蒸汽源 → 不透明的一团（LINK-6），挡视线（SteamCloud 限时云），冰淇淋吹散
+    // ================================================================ 棉花糖蒸汽：迷雾 ∩ 蒸汽源 → 整片粉色棉花糖蒸汽（V23 d：大小 = 整片蒸汽；正在喷的阀门 / 开大火 → 原地变粉，火锅热气 → 新开一片，受全图 2 片上限）
     public class CandySteam : MonoBehaviour
     {
         public static readonly List<CandySteam> Live = new List<CandySteam>();
-        public Object key; public float until; public Vector3 center; int cloudId = -1; readonly List<Transform> puffs = new List<Transform>(); readonly List<Vector3> puffBase = new List<Vector3>(); float born;
-        public static bool Active(Object k) { foreach (var c in Live) if (c != null && c.key == k) return true; return false; }
-        public static CandySteam Spawn(Object key, Vector3 c, float until)
+        public Object key; public float until; public Vector3 center; public SteamArea area;
+        public static bool Active(Object k) { foreach (var c in Live) if (c != null && c.key == k && Time.time < c.until) return true; return false; }
+        public static CandySteam Spawn(Object key, Vector3 c, float until) { return Spawn(key, c, until, null); }
+        public static CandySteam Spawn(Object key, Vector3 c, float until, Fighter owner)
         {
+            SteamArea a = key is SteamValve v && v.Active ? v.area : SteamArea.NearBlind(c, 3f);
+            if (a == null) { a = SteamArea.Spawn(SteamKind.Candy, key, c, key is SteamValve sv ? sv.areaRadius : Config.SteamAreaPot, until - Time.time, owner); if (a == null) return null; }
+            a.SetCandy(owner, until);
             var go = new GameObject("棉花糖蒸汽"); go.transform.position = c;
-            var cs = go.AddComponent<CandySteam>(); cs.key = key; cs.until = until; cs.center = c; cs.born = Time.time;
-            cs.cloudId = SteamCloud.AddTimed(c, Config.CandySteamRadius / .8f, until);   // SteamCloud.Blocks 按半径 ×0.8 判定 → 实际挡视线半径 = CandySteamRadius
-            cs.Build(); Skills.spawned.Add(go);
+            var cs = go.AddComponent<CandySteam>(); cs.key = key; cs.until = until; cs.center = c; cs.area = a;
+            Skills.spawned.Add(go);
             return cs;
         }
         void OnEnable() { Live.Add(this); }
         void OnDisable() { Live.Remove(this); }
-        void OnDestroy() { SteamCloud.ExpireTimed(cloudId); }
-        void Build()
-        {
-            float R = Config.CandySteamRadius;
-            Color pink = new Color(1f, .72f, .9f), white = new Color(1f, .96f, .98f);
-            var rnd = new System.Random(7);
-            for (int i = 0; i < 11; i++)
-            {
-                GameObject puff = Arena.Model("Toon/Kitchen/Cloud_" + (1 + i % 3));
-                if (puff == null) { puff = GameObject.CreatePrimitive(PrimitiveType.Sphere); }
-                foreach (var c in puff.GetComponentsInChildren<Collider>()) Destroy(c);
-                Arena.Fit(puff, new Vector3(R * .95f, 0, 0));
-                var holder = new GameObject("棉花糖团").transform; holder.SetParent(transform, false);
-                puff.transform.SetParent(holder, false);
-                float a = (float)rnd.NextDouble() * Mathf.PI * 2, rr = i == 0 ? 0 : (float)(.35 + rnd.NextDouble() * .5) * R;
-                Vector3 off = new Vector3(Mathf.Cos(a) * rr, -1.7f + (float)rnd.NextDouble() * 2.8f, Mathf.Sin(a) * rr);
-                holder.localPosition = off; holder.localRotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360f, 0);
-                Color col = Color.Lerp(pink, white, (float)rnd.NextDouble());
-                foreach (var r in puff.GetComponentsInChildren<Renderer>()) { r.material.color = col; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; }
-                puffs.Add(holder); puffBase.Add(off);
-            }
-            var ps = new GameObject("棉花糖烟").AddComponent<ParticleSystem>(); ps.transform.SetParent(transform, false);
-            var main = ps.main; main.startLifetime = 2.2f; main.startSpeed = new ParticleSystem.MinMaxCurve(.2f, .8f); main.startSize = new ParticleSystem.MinMaxCurve(2.5f, 4.5f);
-            main.startColor = new Color(1f, .8f, .94f, .9f); main.maxParticles = 160; main.simulationSpace = ParticleSystemSimulationSpace.World;
-            var em = ps.emission; em.rateOverTime = 45; var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Sphere; sh.radius = R * .8f;
-            ps.GetComponent<ParticleSystemRenderer>().material = Fx.Smoke;
-            transform.localScale = Vector3.one * .2f;
-        }
         void Update()
         {
-            if (SteamCloud.SuppressedAt(transform.position)) { if (Match.I != null) Match.I.Feed("冰淇淋吹散了热气 · 棉花糖蒸汽一起散了", new Color(.7f, .95f, 1f)); Destroy(gameObject); return; }   // 反制
-            float age = Time.time - born, left = until - Time.time;
-            float k = Mathf.Min(Mathf.Clamp01(age / .35f), Mathf.Clamp01(left / .5f));
-            transform.localScale = Vector3.one * Mathf.Lerp(.2f, 1f, Mathf.SmoothStep(0, 1, k));
-            for (int i = 0; i < puffs.Count; i++) if (puffs[i] != null) puffs[i].localPosition = puffBase[i] + new Vector3(0, Mathf.Sin(Time.time * 1.3f + i) * .15f, 0);
-            if (left <= 0) Destroy(gameObject);
+            if (area == null || !area.Alive || area.closeAt >= 0 || Time.time >= until) Destroy(gameObject);   // 冰淇淋吹散 / 关阀 / 到时
         }
     }
 
@@ -455,6 +471,7 @@ namespace NeonSiege
             if (Time.time >= trailAt) { trailAt = Time.time + .04f; Fx.Burst(f.transform.position + Vector3.up * .8f, Vector3.down, Time.frameCount % 3 == 0 ? Links.Gold : Skills.Cola, 4, 1.5f, .12f, .45f, .2f); }
             if (Time.time - started < .25f || !f.grounded) return;
             Links.LastColaDist = Links.Flat(f.transform.position, from);
+            LinkPlus.ColaImpact(f, f.transform.position);   // V23 d：可乐炸罐（推开、不掉血）
             Fx.Shockwave(f.transform.position, 4.5f, Skills.Cola, .5f);
             Fx.Burst(f.transform.position + Vector3.up * .2f, Vector3.up, Skills.Bubble, 40, 4f, .12f, .7f, -.1f);
             Fx.Burst(f.transform.position + Vector3.up * .2f, Vector3.up, Skills.Cola, 30, 3f, .16f, .8f, .2f);
@@ -491,6 +508,9 @@ namespace NeonSiege
                 case LinkKind.JellyCurtain: return "这个门框能挂布丁！";
                 case LinkKind.MustardPot: return "火锅能射芥末签！";
                 case LinkKind.CakeBreach: return "这面墙能炸！";
+                case LinkKind.WaferRamp: return "这儿能搭威化坡道！";
+                case LinkKind.SauceIgnite: return "这块酱料能点着！";
+                case LinkKind.CamGum: return "这个监控能糊住！";
                 default: return "这儿有蒸汽，能做棉花糖烟！";
             }
         }
@@ -726,8 +746,10 @@ namespace NeonSiege
             var list = new List<UltWarn.Status>();
             foreach (var su in UltWarn.Statuses) if (su.live == null || su.live()) list.Add(su);
             foreach (var d in Drone.Live)
-                if (d != null && d.PotMode && d.owner != null && !Pings.SameTeam(d.owner, p) && Links.Flat(d.pot.transform.position, p.transform.position) <= Config.MustardPotRadius)
-                { list.Add(new UltWarn.Status { text = "被芥末辣锅呛到 · 离开火锅 " + Config.MustardPotRadius.ToString("0") + " 米", until = Time.time + d.PotLeft, color = Skills.Mustard }); break; }
+                if (d != null && d.PotMode && d.owner != null && !Pings.SameTeam(d.owner, p) && Links.Flat(d.pot.transform.position, p.transform.position) <= d.PotRadiusNow)
+                { list.Add(new UltWarn.Status { text = "被芥末呛雾呛到 · 透视 + 变慢 · 离开锅 " + Links.PotRadius(d.pot).ToString("0") + " 米", until = Time.time + d.PotLeft, color = Skills.Mustard }); break; }
+            if (p.GetComponent<JellyStuck>() != null) list.Add(new UltWarn.Status { text = "身上粘了果冻 · 对面看得到你 · 快换位", until = Time.time + 1f, color = Skills.Caramel });
+            if (LinkTicker.CamInside != null && LinkTicker.CamInside.Blind) list.Add(new UltWarn.Status { text = "在白雾里 · 只看得清 " + Config.SteamInsideSight.ToString("0.#") + " 米 · 关阀 / 听脚步", until = LinkTicker.CamInside.until, color = new Color(.85f, .9f, 1f) });
             foreach (var su in list)
             {
                 Rect r = new Rect(W / 2 - 230, sy, 460, 34);
@@ -752,7 +774,7 @@ namespace NeonSiege
                 if (sp.z > 0)
                 {
                     float x = sp.x / s, y = (Screen.height - sp.y) / s;
-                    string t = plegal ? Links.Result(Links.For(p.role)) : "已被占用";
+                    string t = plegal ? Links.Result(Aim.any ? Aim.kind : Links.For(p.role)) : "已被占用";
                     Fill(new Rect(x - 90, y - 15, 180, 30), new Color(.15f, .08f, .02f, .8f));
                     Txt(new Rect(x - 90, y - 15, 180, 30), "★ " + t, st, plegal ? Links.Gold : new Color(1f, .4f, .35f));
                 }

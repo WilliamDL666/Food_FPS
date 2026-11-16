@@ -211,7 +211,11 @@ namespace NeonSiege
                 case "enemy_cupcake": return "点火纸杯蛋糕！";
                 case "enemy_marsh": return "被棉花糖迷雾黏住了";
                 case "link_self": { var lp = Match.I != null ? Match.I.player : null; return lp == null ? "地图联动" : "你的技能能和地图联动：" + Links.Name(Links.For(lp.role)); }   // V22 第三期
-                case "enemy_pot": return "被芥末辣锅呛到了";
+                case "enemy_pot": return "被芥末呛雾呛到了";
+                case "steam_area": return "整片蒸汽";
+                case "steam_inside": return "你在白雾里";
+                case "enemy_jelly": return "身上粘了果冻";
+                case "link_side": { var lp = Match.I != null ? Match.I.player : null; int sk = lp != null ? LinkPlus.SideFor(lp.role) : -1; return sk < 0 ? "副联动" : "副联动：" + Links.Name((LinkKind)sk); }
             }
             return id;
         }
@@ -240,7 +244,11 @@ namespace NeonSiege
                 case "enemy_cupcake": return "对面焚芯扔的，0.9 秒后炸开：听到滋滋声马上撤出红圈";
                 case "enemy_marsh": return "雾里会变慢、散布变大、小地图被糊住。走出迷雾或等它散掉";
                 case "link_self": return p == null ? null : Links.TipBody(p.role);
-                case "enemy_pot": return "对面夜鸦把芥末签射进了火锅：辣雾里一直透墙可见。离开火锅 " + Config.MustardPotRadius.ToString("0") + " 米，或用棉花糖迷雾 / 冰淇淋破掉";
+                case "enemy_pot": return "对面夜鸦把芥末签射进了锅：呛雾里一直透墙可见、还会变慢。离开锅 " + Config.MustardPotRadius.ToString("0") + " 米，或用棉花糖迷雾 / 冰淇淋破掉";
+                case "steam_area": return "外面看不进去，里面只看得清 " + Config.SteamInsideSight.ToString("0.#") + " 米，" + Config.SteamAreaLife.ToString("0") + " 秒后散。反制：往雾里扔手雷 / 纸杯（爆炸照样炸到）、走到雾中间的阀门按住 G 关掉。地图上白色那片就是";
+                case "steam_inside": return "只看得清 " + Config.SteamInsideSight.ToString("0.#") + " 米，靠听脚步。阀门 / 旋钮在雾中间，按住 G " + Config.SteamCloseHold.ToString("0.#") + " 秒关掉";
+                case "enemy_jelly": return "穿过了对面的果冻门帘：" + Config.JellyStickTime.ToString("0.#") + " 秒内对面隔墙看得到你，过去了马上换位";
+                case "link_side": return p == null ? null : Links.SideTip(p.role);
             }
             return null;
         }

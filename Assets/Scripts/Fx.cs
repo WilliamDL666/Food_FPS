@@ -235,7 +235,7 @@ namespace NeonSiege
         {
             Burst(pos, Vector3.up, new Color(1f, .5f, .15f), 80, radius * 3.2f, .5f, .7f, .2f);
             Burst(pos, Vector3.up, new Color(1f, .9f, .6f), 20, radius * 1.4f, 1.6f, .25f, 0f);
-            Burst(pos, Vector3.up, new Color(.18f, .16f, .15f, .7f), 30, radius * 1.1f, 2.2f, 2.2f, -.08f, Smoke);
+            Burst(pos, Vector3.up, ToonAssets.Available ? new Color(1f, .93f, .84f, .55f) : new Color(.18f, .16f, .15f, .7f), 30, radius * 1.1f, 2.2f, 2.2f, -.08f, ToonAssets.Available ? UltFx.SoftMat : Smoke);   // V23 打磨：美食模式不出黑烟（汽水罐爆炸原来一柱黑烟盖住可乐喷泉），换成奶油色
             Sparks(pos, Vector3.up, new Color(1f, .7f, .3f), 40);
             Shockwave(pos, radius * 1.6f, new Color(1f, .6f, .3f));
             Debris(pos, new Color(.3f, .28f, .26f), 10);

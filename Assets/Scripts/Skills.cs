@@ -113,6 +113,16 @@ namespace NeonSiege
                     // V22 第三期：预览贴近被打开的蛋糕墙破口 / 墙洞（2 m 内）→ 吸附、变金色 = 嵌入补洞
                     if (Links.PatchTarget(f, CoverDesired(f), out var br, out bool busy))
                     { p.patch = br; p.link = true; p.legal = !busy; p.point = br.center; rot = br.rot; size = new Vector3(br.width, br.height, .45f); }
+                    else if (LinkPlus.RampTarget(f, CoverDesired(f), out var rs, out bool rbusy))
+                    {
+                        // V23 d：对准台边 → 金色斜放的坡道预览
+                        p.patch = null; p.link = true; p.legal = !rbusy; p.point = rs.basePos;
+                        float L = Vector3.Distance(rs.top, rs.basePos) + .5f; rot = Quaternion.LookRotation(rs.top - rs.basePos, Vector3.up); size = new Vector3(2.6f, .25f, L);
+                        if (p.holo == null) { p.holo = GameObject.CreatePrimitive(PrimitiveType.Cube); Object.Destroy(p.holo.GetComponent<Collider>()); p.holo.GetComponent<Renderer>().material = new Material(Resources.Load<Material>("Materials/Holo") ?? Fx.Additive); }
+                        p.holo.transform.localScale = size; p.holo.transform.position = (rs.top + rs.basePos) / 2f; p.holo.transform.rotation = rot;
+                        p.holo.GetComponent<Renderer>().material.SetColor("_Color", p.legal ? Links.Gold * 1.3f : bad);
+                        break;
+                    }
                     else { p.patch = null; p.link = false; p.legal = CoverPlacement(f, out p.point, out rot); }
                     if (p.holo == null)
                     {
@@ -134,9 +144,10 @@ namespace NeonSiege
                     p.point = Simulate(f.Eye + f.AimDir * .5f, v, pts, arrow ? Config.ArrowGravity : 1f, out Collider hitCol);
                     p.arc.positionCount = pts.Count; p.arc.SetPositions(pts.ToArray());
                     // V22 第三期：签子会扎进火锅 / 纸杯会粘上蛋糕墙 → 弹道和落点圈变金色
-                    if (arrow) { var pot = Links.PotAt(p.point); p.link = pot != null && !Links.PotBusy(pot); }
-                    else p.link = hitCol != null && hitCol.GetComponent<WallPiece>() != null;
-                    Circle(p.ring, p.point, !p.link ? (f.role == Role.Raven ? Config.DroneRadius : Config.BlastRadius) : arrow ? Config.MustardPotRadius : Config.BlastWallDoorHalf + .3f);
+                    Component potHit = null;
+                    if (arrow) { potHit = Links.PotAt(p.point); p.link = potHit != null && !Links.PotBusy(potHit); }
+                    else p.link = hitCol != null && hitCol.GetComponent<WallPiece>() != null || LinkPlus.SauceAt(p.point, .8f) >= 0;   // V23 d：纸杯炸酱料也算联动
+                    Circle(p.ring, p.point, !p.link ? (f.role == Role.Raven ? Config.DroneRadius : Config.BlastRadius) : arrow ? Links.PotRadius(potHit) : Config.BlastWallDoorHalf + .3f);
                     p.arc.startColor = p.arc.endColor = p.ring.startColor = p.ring.endColor = p.link ? Links.Gold : ok;
                     p.legal = true;
                     break;
@@ -145,6 +156,7 @@ namespace NeonSiege
                     p.point = GroundPoint(f, 22f);
                     Circle(p.ring, p.point, Config.NoiseRadius);
                     p.link = Links.SteamNear(p.point, Config.NoiseRadius + .5f, out _);   // V22 第三期：迷雾能罩住蒸汽源 → 金色
+                    if (!p.link && Arena.I != null && f.team != Match.I.DefendingTeam) foreach (var cam in Arena.I.cams) if (cam != null && cam.Working && Links.Flat(cam.transform.position, p.point) <= Config.NoiseRadius + .5f) p.link = true;   // V23 d：罩住守方监控
                     p.ring.startColor = p.ring.endColor = p.link ? Links.Gold : new Color(.9f, .4f, 1f);
                     p.legal = true;
                     break;
@@ -161,6 +173,7 @@ namespace NeonSiege
                 case Role.Rivet:
                     // V22 第三期：落点 2 m 内有被打开的破口 → 嵌入补洞（例外：被打出来的破口可以封，原有入口仍不能封）
                     if (Links.PatchTarget(f, target, out var br, out bool busy)) { if (busy || !Links.SpawnPatch(f, br)) return false; }
+                    else if (LinkPlus.RampTarget(f, target, out var rs, out bool rbusy)) { if (rbusy || !LinkPlus.SpawnRamp(f, rs)) return false; }   // V23 d 副联动：威化坡道
                     else
                     {
                         if (!f.human) { if (!CoverPlacementAt(f, target, out target, out _)) return false; }
@@ -487,7 +500,7 @@ namespace NeonSiege
             }
         }
 
-        public static void NotifyKill(Fighter killer, Fighter victim) { }
+        public static void NotifyKill(Fighter killer, Fighter victim) { LinkPlus.OnKill(victim); }   // V23 d：雾里的击杀遥测
 
         // V23：汽水冲刺的可乐尾迹（棕色 + 白色气泡，0.7 s 消散）
         public static TrailRenderer ColaTrail(Fighter f)
@@ -827,6 +840,8 @@ namespace NeonSiege
                 jiggle.localPosition = new Vector3(0, jiggle.localScale.y / 2f, 0);
                 if (hp < hpMax * .5f && Time.time >= dripAt) { dripAt = Time.time + Mathf.Lerp(.15f, .5f, hp / (hpMax * .5f)); Fx.Burst(transform.position + transform.right * Random.Range(-w * .45f, w * .45f) + Vector3.up * .15f, Vector3.down, new Color(.75f, .45f, .12f), 2, .5f, .07f, .6f, 1.5f); }   // 血量 < 50%：底部滴焦糖
             }
+            if (docked && Match.I != null)   // V23 d：果冻粘身 —— 穿过门帘的敌人透墙可见 JellyStickTime 秒
+                foreach (var e in Match.I.fighters) if (e.alive && e.team != owner.team && CurtainAt(e.transform.position) == this) LinkPlus.JellyStick(e, this);
             if (age > life || !docked && !owner.alive) { if (!docked) owner.shieldActiveUntil = 0; Destroy(gameObject); }
         }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
@@ -933,9 +948,10 @@ namespace NeonSiege
     {
         public Fighter owner; float landed; public float Landed { get { return landed; } } bool scanned, scanned2; LineRenderer pulse; Light lamp; float nextBeep; Vector3 normal = Vector3.up;
         // V22 第三期：芥末辣锅模式 —— 不做两次扫描，改为火锅周围 MustardPotRadius 内持续 MustardPotLife 秒的黄绿辣雾；雾里的敌人一直透墙可见（不需要视线），离开后再可见 MustardPotLinger 秒
-        public HotpotHazard pot; float potTick, coughAt; int potFound; readonly HashSet<Fighter> potSeen = new HashSet<Fighter>(); GameObject fog;
+        public Component pot; float potTick, coughAt; int potFound; readonly HashSet<Fighter> potSeen = new HashSet<Fighter>(); GameObject fog;   // V23 d：pot = 火锅 / 关东煮锅 / 回血炉
         public bool PotMode { get { return pot != null; } }
         public float PotLeft { get { return pot != null ? Mathf.Max(0, Config.MustardPotLife - (Time.time - landed)) : 0; } }
+        public float PotRadiusNow { get { return pot == null ? 0 : Links.PotRadius(pot) * Mathf.Clamp01((Time.time - landed) / Config.MustardSpread); } }   // V23 d：1.75 s 扩散到最大
         public static readonly List<Drone> Live = new List<Drone>();   // V21：敌方产物气泡用
         void OnEnable() { Live.Add(this); }
         void OnDisable() { Live.Remove(this); }
@@ -949,12 +965,12 @@ namespace NeonSiege
             lamp.transform.position = p + n * .3f; lamp.type = LightType.Point; lamp.color = ScanColor; lamp.range = 5; lamp.intensity = 2;
             Sfx.Play(Skills.Food ? "food_squish" : "computerNoise", p, .8f, 1.3f, 1f, 35f);
         }
-        public void InitPot(Fighter f, Vector3 p, Vector3 n, HotpotHazard h)
+        public void InitPot(Fighter f, Vector3 p, Vector3 n, Component h)
         {
             Init(f, p, n); pot = h;
-            fog = Links.MustardFog(h.transform.position);
+            fog = Links.MustardFog(h.transform.position, Links.PotRadius(h));
             lamp.range = 9; lamp.intensity = 4;
-            Links.Trigger(LinkKind.MustardPot, f, h.transform.position + Vector3.up, "关口 " + Config.MustardPotLife.ToString("0") + " 秒内谁站进辣雾都暴露");
+            Links.Trigger(LinkKind.MustardPot, f, h.transform.position + Vector3.up, (h is KitchenStation ? "回血炉 " : "") + Links.PotRadius(h).ToString("0") + " m 芥末呛雾 " + Config.MustardPotLife.ToString("0") + " 秒 · 雾里的人透视 + 变慢");
         }
         void OnDestroy() { if (fog != null) Destroy(fog); }
         void PotUpdate(float age)
@@ -970,9 +986,10 @@ namespace NeonSiege
             {
                 if (!e.alive || e.team == owner.team) continue;
                 Vector3 d = e.transform.position - c; if (Mathf.Abs(d.y) > 3.5f) continue; d.y = 0;
-                if (d.magnitude > Config.MustardPotRadius) continue;
-                if (sugared || Links.EnemyNoiseCovers(e.transform.position, owner.team) || Time.time < e.hiddenFromScanUntil) { NoiseField.CreditBlock(e); continue; }
-                e.revealedUntil = Mathf.Max(e.revealedUntil, Time.time + Config.MustardPotLinger + .2f);
+                if (d.magnitude > PotRadiusNow) continue;
+                if (sugared || Links.EnemyNoiseCovers(e.transform.position, owner.team) || Time.time < e.hiddenFromScanUntil) { NoiseField.CreditBlock(e); continue; }   // 糖味盖芥末
+                e.revealedUntil = Mathf.Max(e.revealedUntil, Time.time + Config.MustardPotLinger + .2f);   // 不需要视线：芥末味穿透蒸汽
+                e.mustardUntil = Mathf.Max(e.mustardUntil, Time.time + .3f);                               // V23 d：减速 ×MustardSlow、冲刺耗体力 ×MustardSprintDrain
                 if (potSeen.Add(e)) { potFound++; if (potFound == 1) owner.stats.skillEffective++; }
                 if (cough) Sfx.Play("food_squish", e.Chest, .55f, 1.9f, 1f, 15f);   // 咳嗽声 15 m
                 if (e.human) FoodTips.Trigger("enemy_pot");
@@ -1155,8 +1172,13 @@ namespace NeonSiege
                 var cover = c.GetComponentInParent<DeployedCover>();
                 if (cover != null && cover.owner.team != owner.team) { cover.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; continue; }
                 var shield = c.GetComponentInParent<ShieldWall>();
-                if (shield != null && shield.owner.team != owner.team) { shield.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; }
+                if (shield != null && shield.owner.team != owner.team) { shield.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; continue; }
+                var ramp = c.GetComponentInParent<WaferRamp>();
+                if (ramp != null && ramp.owner != null && ramp.owner.team != owner.team) { ramp.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; }
             }
+            LinkPlus.OnBlast(p);
+            bool sauceFire = LinkPlus.SauceIgnite(owner, p);   // V23 d 副联动：点酱（黄油着火时代替焦糖火）
+            if (sauceFire) effective = true;
             if (stuck != null && stuck.wall != null && !hadHole)
             {
                 // V22 第三期：开墙 —— 原 2.3 m 炸碎范围之外，再把落点正下方 ±BlastWallDoorHalf、地面到 max(BlastWallDoorHeight, 落点高) 的墙块全部炸开 → 必定是能过人的门洞
@@ -1165,16 +1187,19 @@ namespace NeonSiege
                 {
                     if (!q.Alive) continue;
                     Vector3 ql = q.transform.localPosition;
-                    if (Mathf.Abs(ql.x - lp.x) <= Config.BlastWallDoorHalf && ql.y <= Mathf.Max(Config.BlastWallDoorHeight, lp.y + .3f)) q.TakeDamage(999, owner, true);
+                    if (Mathf.Abs(ql.x - lp.x) <= Config.BlastWallDoorHalf && ql.y - q.transform.localScale.y * .5f < Mathf.Max(Config.BlastWallDoorHeight, lp.y + .3f)) q.TakeDamage(999, owner, true);   // V23 d：底边低于门高的块都炸开 → 门洞 ≥ 3.8 × 2.6 m
                 }
                 effective = true;
                 w.Invalidate(); var hole = w.Opening();
-                if (!hadHole && hole != null) Links.Trigger(LinkKind.CakeBreach, owner, hole.center + Vector3.up * 1.2f, "蛋糕墙炸出一个能过人的洞（" + hole.width.ToString("0.0") + " m 宽）");
+                if (!hadHole && hole != null)
+                {
+                    Links.Trigger(LinkKind.CakeBreach, owner, hole.center + Vector3.up * 1.2f, "蛋糕墙炸出一个两人并排的大门（" + hole.width.ToString("0.0") + " m 宽）· 蛋糕粉尘 " + Config.CakeDustLife.ToString("0.#") + " 秒");
+                    SteamArea.Spawn(SteamKind.Dust, w, hole.center + Vector3.up * 1.2f, Config.CakeDustRadius, Config.CakeDustLife, owner);   // V23 d：炸开瞬间洞口扬起蛋糕粉尘（同一套视线判定）
+                }
             }
             if (effective) owner.stats.skillEffective++;
             if (Skills.Food && (hitPerson || hitCover)) { LastResult = hitPerson ? "生日快乐！" : "烤酥了！"; SkillPop.Show(owner, LastResult, hitPerson ? new Color(1f, .5f, .65f) : Skills.Caramel); }   // V23：命中人 / 命中掩体
-            var fire = new GameObject(Skills.Food ? "焦糖火" : "燃烧区"); fire.transform.position = Skills.GroundAt(p);
-            fire.AddComponent<FireZone>().owner = owner; Skills.spawned.Add(fire);
+            if (!sauceFire) { var fire = new GameObject(Skills.Food ? "焦糖火" : "燃烧区"); fire.transform.position = Skills.GroundAt(p); fire.AddComponent<FireZone>().owner = owner; Skills.spawned.Add(fire); }
             Destroy(gameObject);
         }
     }
@@ -1296,7 +1321,7 @@ namespace NeonSiege
                 else { f.jammedUntil = Time.time + .15f; anyJammed = true; if (f.human) { FoodTips.Trigger("enemy_marsh"); if (Skills.Food) SkillPop.EdgeSugar = 1f; } }   // V23：雾里敌人屏幕四角糊一层糖丝
             }
             if (anyJammed) { jamTime += Time.deltaTime; if (jamTime >= 1f) CreditOnce(); }
-            if (Time.time >= candyAt) { candyAt = Time.time + .25f; Links.CandyCheck(this); }   // V22 第三期：迷雾 ∩ 蒸汽源 → 棉花糖蒸汽
+            if (Time.time >= candyAt) { candyAt = Time.time + .25f; Links.CandyCheck(this); LinkPlus.GumCheck(this); }   // V23 d：迷雾罩住守方监控 → 糊住   // V22 第三期：迷雾 ∩ 蒸汽源 → 棉花糖蒸汽
             if (Random.value < .3f) Fx.Burst(transform.position + new Vector3(Random.Range(-5f, 5f), Random.Range(.3f, 2.5f), Random.Range(-5f, 5f)), Vector3.up, Skills.Food ? FoodFx.Confetti[Random.Range(0, 6)] : new Color(.8f, .4f, 1f), 3, 1, .06f, .25f, 0);   // 飘糖粒
             if (Skills.Food && Time.time >= popAt) { popAt = Time.time + .7f; Sfx.Play("food_poprock_loop", transform.position, .45f, Random.Range(.95f, 1.05f), 1f, 45f); }   // V23：跳跳糖噼啪循环（45 m）
             if (Skills.Food && age < .35f && dome != null) dome.localScale = domeScale * (.4f + .6f * Mathf.Sin(Mathf.Clamp01(age / .35f) * Mathf.PI * .5f) + .12f * Mathf.Sin(age / .35f * Mathf.PI));   // "噗"地膨出

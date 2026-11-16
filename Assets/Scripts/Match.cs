@@ -25,7 +25,9 @@ namespace NeonSiege
         public float retake = -1;                      // 下包后第一个守方进入包点用了几秒
         public int rotate, gateClose, gateOpen, stuck, doorEnd, valves;   // 走连接巷的攻方人数 / 关门 / 开门 / 卡在交互物前 / 回合结束停在门前 / 拧蒸汽阀
         // V22 第三期：联动触发次数（按 LinkKind：可乐弹射 / 嵌入补洞 / 果冻门帘 / 芥末辣锅 / 开墙 / 棉花糖蒸汽）、团队标记次数
-        public int[] links = new int[6]; public int pings;
+        public int[] links = new int[9]; public int pings;   // V23 d：+ 威化坡道 / 点酱 / 糊监控
+        // V23 d：整片蒸汽遥测（设计稿_V23 §8.2）
+        public float steamArea; public int valveClose, nadeSteam, killSteam, knob, blindMax;
         public bool Timeout { get { return reason != null && reason.Contains("时间"); } }
     }
 
@@ -101,6 +103,7 @@ namespace NeonSiege
             arena.Build();
             ArenaLightmaps.Apply(arena);   // 编辑器里烘焙好的全局光照
             FoodScenery.Dress(arena);      // V21：场景道具（建在 Arena 层级外、烘焙匹配之后，不影响光照贴图按顺序匹配）
+            LinkPlus.Dress(arena);         // V23 d：开大火旋钮 / 威化坡道点 / 酱料点（同样建在 Arena 层级外）
             GameSettings.Apply();
             Time.timeScale = 1;
             gameObject.AddComponent<Ambience>();
@@ -495,6 +498,7 @@ namespace NeonSiege
         public void OnValve() { if (current != null && phase == Phase.Live) current.valves++; }
         public void OnLink(LinkKind k) { if (current != null && phase == Phase.Live) current.links[(int)k]++; }   // V22 第三期
         public void OnPing() { if (current != null && phase == Phase.Live) current.pings++; }
+        public RoundRecord Cur { get { return current != null && phase == Phase.Live ? current : null; } }   // V23 d
 
         // Called every frame from Fighter.HandleUse. Returns true when the bomb consumed the E key.
         public bool BombAction(Fighter f, bool held, float dt)
@@ -773,11 +777,13 @@ namespace NeonSiege
         public string MapSummary()
         {
             int n = 0, timeouts = 0, a = 0, b = 0, rot = 0, gateRounds = 0, stuck = 0, doorEnd = 0, retN = 0, pings = 0; float ret = 0;
-            var kd = new int[4]; var zones = new Dictionary<string, int>(); var lk = new int[6];
+            var kd = new int[4]; var zones = new Dictionary<string, int>(); var lk = new int[9];
+            float steamS = 0; int vClose = 0, vCloseRounds = 0, nadeS = 0, killS = 0, knobs = 0, blindMax = 0, steamRounds = 0;
             foreach (var r in records)
             {
                 n++; if (r.Timeout) timeouts++;
-                for (int i = 0; i < 6; i++) lk[i] += r.links[i]; pings += r.pings;
+                for (int i = 0; i < lk.Length; i++) lk[i] += r.links[i]; pings += r.pings;
+                steamS += r.steamArea; vClose += r.valveClose; if (r.valveClose > 0) vCloseRounds++; nadeS += r.nadeSteam; killS += r.killSteam; knobs += r.knob; blindMax = Mathf.Max(blindMax, r.blindMax); if (r.steamArea > 0) steamRounds++;
                 if (r.plantSite == "A") a++; else if (r.plantSite == "B") b++;
                 if (r.rotate > 0) rot++; if (r.gateClose > 0) gateRounds++;
                 stuck += r.stuck; doorEnd += r.doorEnd;
@@ -792,7 +798,8 @@ namespace NeonSiege
                 + " kills=" + kills + " near/mid/far/xfar=" + kd[0] + "/" + kd[1] + "/" + kd[2] + "/" + kd[3] + "(" + Pct(kd[0], kills) + "/" + Pct(kd[1], kills) + "/" + Pct(kd[2], kills) + "/" + Pct(kd[3], kills) + ")"
                 + " retake=" + (retN > 0 ? (ret / retN).ToString("0.0") : "-") + "s(n=" + retN + ") rotateRounds=" + rot + "(" + Pct(rot, n) + ") gateCloseRounds=" + gateRounds + "(" + Pct(gateRounds, n) + ")"
                 + " stuck=" + stuck + " doorEnd=" + doorEnd + " contact=[" + zs.ToString().Trim() + "]"
-                + " links(cola/patch/curtain/pot/breach/steam)=" + string.Join("/", lk) + " pings=" + pings;
+                + " links(cola/patch/curtain/pot/breach/steam/ramp/sauce/gum)=" + string.Join("/", lk) + " pings=" + pings
+                + " steam_area_s/round=" + (n > 0 ? (steamS / n).ToString("0.0") : "-") + " steamRounds=" + steamRounds + " knob=" + knobs + " valve_close=" + vClose + "(rounds " + Pct(vCloseRounds, n) + ") nade_in_steam=" + nadeS + " kills_in_steam=" + killS + " blind_max=" + blindMax;
         }
 
         // ------------------------------------------------------------------ 试玩记录
@@ -801,13 +808,13 @@ namespace NeonSiege
             var sb = new StringBuilder();
             sb.AppendLine("round,attackers,winner,reason,duration_s,plant_site,plant_time_s,first_contact_s,first_contact_zone,blue_kills,red_kills,blue_comp,red_comp,routes,skill_uses(猎隼/铆钉/铁幕/夜鸦/焚芯/幻频),skill_effective,"
                 + "kill_near(<15),kill_mid(15-40),kill_far(40-60),kill_xfar(>60),retake_s,rotate_attackers,gate_close,gate_open,stuck,door_end,timeout,valves,"
-                + "link_cola,link_patch,link_curtain,link_pot,link_breach,link_steam,pings");
+                + "link_cola,link_patch,link_curtain,link_pot,link_breach,link_steam,pings,link_ramp,link_sauce,link_gum,steam_area_s,valve_close,nade_in_steam,kills_in_steam,knob,blind_max");
             foreach (var r in records)
                 sb.AppendLine(string.Join(",", r.round, Config.TeamName(r.attackers), r.winner < 0 ? "draw" : Config.TeamName(r.winner), r.reason, r.duration.ToString("0.0"),
                     r.plantSite, r.plantTime.ToString("0.0"), r.firstContact.ToString("0.0"), r.firstContactZone, r.kills[0], r.kills[1],
                     r.blueComp, r.redComp, "\"" + r.routes + "\"", string.Join("/", r.skillUses), string.Join("/", r.skillEffective),
                     r.killDist[0], r.killDist[1], r.killDist[2], r.killDist[3], r.retake.ToString("0.0"), r.rotate, r.gateClose, r.gateOpen, r.stuck, r.doorEnd, r.Timeout ? 1 : 0, r.valves,
-                    r.links[0], r.links[1], r.links[2], r.links[3], r.links[4], r.links[5], r.pings));
+                    r.links[0], r.links[1], r.links[2], r.links[3], r.links[4], r.links[5], r.pings, r.links[6], r.links[7], r.links[8], r.steamArea.ToString("0.0"), r.valveClose, r.nadeSteam, r.killSteam, r.knob, r.blindMax));
             sb.AppendLine();
             sb.AppendLine("summary," + MapSummary());
             // V20：每个角色的战斗数据（部位命中分布、护甲伤害、穿墙命中、技能使用 / 有效）

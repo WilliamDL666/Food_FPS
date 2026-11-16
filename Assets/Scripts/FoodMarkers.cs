@@ -93,7 +93,7 @@ namespace NeonSiege
                     }
                     label = "G 开关卷帘门"; c = new Color(.5f, .85f, 1f); h = 2.6f; return true;
                 case SteamValve v:   // V22 第二期：蒸汽阀
-                    label = v.Active ? "白雾中 · 挡住视线" : v.CooldownLeft > 0 ? "蒸汽阀 · 还要 " + Mathf.CeilToInt(v.CooldownLeft) + " 秒" : "G 拧蒸汽阀 · 白雾挡视线";
+                    label = v.MarkerLabel(p);   // V23 d：整片白雾 / 开大火 / 关阀 / 全图盲区已满
                     c = v.CooldownLeft > 0 && !v.Active ? FoodGuide.Grey : new Color(.85f, .9f, 1f); h = 2.3f; return true;
                 case Terminal _: label = "G 门禁终端"; c = new Color(.5f, .85f, 1f); h = 2.2f; return true;
             }

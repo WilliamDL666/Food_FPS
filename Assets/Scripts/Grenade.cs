@@ -92,7 +92,8 @@ namespace NeonSiege
                 }
             }
             Sfx.Play("boom_far", p, .7f, 1f, 1f, 400f);
-            if (ToonAssets.Available) MentosPile.TryFountain(p, owner, touched);   // 汽水 + 曼妥思（V23：砸中过瓶子的也算）
+            if (ToonAssets.Available) MentosPile.TryFountain(p, owner, touched);
+            LinkPlus.OnBlast(p);   // V23 d：往雾里扔的雷（遥测 nade_in_steam）   // 汽水 + 曼妥思（V23：砸中过瓶子的也算）
             float rad = Radius * (ToonAssets.Available && owner != null && owner.role == Role.Ember ? 1.2f : 1f);   // 焚芯被动
             if (Match.I != null)
                 foreach (var f in Match.I.fighters)

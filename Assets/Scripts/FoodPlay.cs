@@ -659,8 +659,8 @@ namespace NeonSiege
                 Fountains++; LastAt = Time.time;
                 p.readyAt = Time.time + 15f;
                 Vector3 c = p.transform.position;
-                for (int i = 0; i < 3; i++) Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, new Color(.45f, .22f, .1f), 60, 16f, .15f, 1.6f, .7f);
-                Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, Color.white, 40, 12f, .25f, 1.4f, .3f, Fx.Smoke);
+                for (int i = 0; i < 3; i++) Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, i == 1 ? new Color(1f, .97f, .9f) : ColaFountain.Caramel, 60, 16f, .15f, 1.6f, .7f);   // V23 打磨：原来深棕 (.45,.22,.1) 三连发 = 远看一柱黑烟 → 亮焦糖 + 白泡沫
+                Fx.Burst(c + Vector3.up * 1.5f, Vector3.up, Color.white, 40, 12f, .25f, 1.4f, .3f, UltFx.SoftMat);
                 Sfx.Play("food_fizz", c, 1f, .7f, 1f, 80f); Sfx.Play("food_boing", c, 1f, .6f, 1f, 60f);
                 // V23 A1：原来的喷泉和普通汽水罐爆炸几乎一样（同一个 food_fizz、同色小粒子 0.15 m），离远了看不出"喷了" → 加一根 2.5 s 的可乐水柱 + 泡沫圈 + 专属音 + 头顶字
                 ColaFountain.Spawn(c);
@@ -683,7 +683,10 @@ namespace NeonSiege
     // V23 A1：可乐喷泉的持续表现（2.5 s 水柱，高 ≈ 9 m，顶上开花；喷完留一滩泡沫）
     public class ColaFountain : MonoBehaviour
     {
-        float born; ParticleSystem col, foam; Light lamp;
+        // V23 打磨：焦糖棕半透明水柱 + 橙色发光芯 + 大量白泡沫 / 气泡 + 顶部泡沫花 + 底部泡沫圈（原来深棕色 Alpha Blended 叠成一柱黑烟）
+        public static readonly Color Caramel = new Color(.92f, .55f, .22f, .6f), CaramelLight = new Color(1f, .76f, .42f, .5f);
+        public static readonly string[] Layers = { "可乐水柱", "亮芯", "泡沫", "气泡", "泡沫花", "底部泡沫" };
+        float born; ParticleSystem col, core, foam, bubbles, bloom, baseFoam; Light lamp;
         public static ColaFountain Spawn(Vector3 at) { var go = new GameObject("可乐喷泉"); go.transform.position = at; var f = go.AddComponent<ColaFountain>(); f.born = Time.time; return f; }
         ParticleSystem Make(string n, Color a, Color b, float size0, float size1, float speed0, float speed1, float rate, float radius, float grav, Material mat)
         {
@@ -692,13 +695,22 @@ namespace NeonSiege
             main.startLifetime = new ParticleSystem.MinMaxCurve(.9f, 1.4f); main.startSpeed = new ParticleSystem.MinMaxCurve(speed0, speed1); main.startSize = new ParticleSystem.MinMaxCurve(size0, size1);
             main.startColor = new ParticleSystem.MinMaxGradient(a, b); main.gravityModifier = grav; main.maxParticles = 900; main.simulationSpace = ParticleSystemSimulationSpace.World;
             var em = ps.emission; em.rateOverTime = rate; var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Cone; sh.angle = 6f; sh.radius = radius; sh.rotation = new Vector3(-90, 0, 0);
-            g.GetComponent<ParticleSystemRenderer>().material = mat; return ps;
+            var fade = ps.colorOverLifetime; fade.enabled = true; var gr = new Gradient();
+            gr.SetKeys(new[] { new GradientColorKey(Color.white, 0), new GradientColorKey(Color.white, 1) }, new[] { new GradientAlphaKey(1, 0), new GradientAlphaKey(1, .7f), new GradientAlphaKey(0, 1) }); fade.color = gr;
+            var r = g.GetComponent<ParticleSystemRenderer>(); r.material = mat; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; return ps;
         }
         void Start()
         {
-            col = Make("可乐水柱", new Color(.45f, .22f, .08f), new Color(.7f, .42f, .18f), .35f, .7f, 11f, 14f, 260f, .25f, 1f, Fx.Smoke);   // 半透明混合（加色混合的深棕色在亮背景上几乎看不见）
-            foam = Make("泡沫", Color.white, new Color(1f, .93f, .8f), .35f, .8f, 9f, 13f, 90f, .3f, .9f, Fx.Smoke);
-            lamp = new GameObject("喷泉光").AddComponent<Light>(); lamp.transform.SetParent(transform, false); lamp.transform.localPosition = Vector3.up * 3f; lamp.color = new Color(1f, .7f, .4f); lamp.range = 12f; lamp.intensity = 3f;
+            col = Make(Layers[0], Caramel, CaramelLight, .3f, .6f, 11f, 14f, 200f, .22f, 1f, UltFx.SoftMat);   // 亮焦糖色 + 半透明（深棕色叠起来会发黑）
+            core = Make(Layers[1], new Color(1f, .55f, .15f, .55f), new Color(1f, .85f, .5f, .45f), .25f, .45f, 12f, 14.5f, 120f, .12f, 1f, Fx.Additive);   // 发光芯：逆光也像透亮的汽水
+            foam = Make(Layers[2], Color.white, new Color(1f, .95f, .85f), .45f, 1.1f, 8f, 13f, 180f, .35f, .9f, UltFx.SoftMat);
+            bubbles = Make(Layers[3], new Color(1f, 1f, 1f, .9f), new Color(.9f, .97f, 1f, .8f), .08f, .18f, 3f, 7f, 120f, .6f, -.05f, Fx.Additive);
+            { var m = bubbles.main; m.startLifetime = new ParticleSystem.MinMaxCurve(1.2f, 2f); var sh = bubbles.shape; sh.angle = 25f; var n = bubbles.noise; n.enabled = true; n.strength = .8f; n.frequency = 1.2f; }
+            bloom = Make(Layers[4], Color.white, new Color(1f, .93f, .8f), .5f, 1.2f, 2.5f, 5f, 100f, .6f, .5f, UltFx.SoftMat);   // 顶上散开成泡沫花（水柱约 1 s 到顶）
+            { bloom.transform.localPosition = Vector3.up * 9f; var m = bloom.main; m.startDelay = .45f; m.startLifetime = new ParticleSystem.MinMaxCurve(1f, 1.6f); var sh = bloom.shape; sh.shapeType = ParticleSystemShapeType.Sphere; sh.radius = .6f; }
+            baseFoam = Make(Layers[5], Color.white, new Color(1f, .9f, .75f), .4f, .9f, 1f, 2.5f, 60f, 1f, .3f, UltFx.SoftMat);
+            { baseFoam.transform.localPosition = Vector3.up * .15f; var sh = baseFoam.shape; sh.shapeType = ParticleSystemShapeType.Circle; sh.radius = 1f; sh.rotation = new Vector3(90, 0, 0); }
+            lamp = new GameObject("喷泉光").AddComponent<Light>(); lamp.transform.SetParent(transform, false); lamp.transform.localPosition = Vector3.up * 3f; lamp.color = new Color(1f, .7f, .4f); lamp.range = 14f; lamp.intensity = 4f;
             Fx.Shockwave(transform.position, 5.5f, new Color(1f, .9f, .75f), .5f);
         }
         void Update()
@@ -706,11 +718,11 @@ namespace NeonSiege
             float age = Time.time - born;
             if (age > 2.5f && col != null)
             {
-                var e1 = col.emission; e1.enabled = false; var e2 = foam.emission; e2.enabled = false;
-                if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit g, 3f, ~0, QueryTriggerInteraction.Ignore)) { var q = FoodFx.Splat(g.point, g.normal, new Color(.6f, .38f, .2f), 3f); if (q != null) Destroy(q, 8f); }
+                foreach (var ps in new[] { col, core, foam, bubbles, bloom, baseFoam }) if (ps != null) { var e = ps.emission; e.enabled = false; }
+                if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit g, 3f, ~0, QueryTriggerInteraction.Ignore)) { var q = FoodFx.Splat(g.point, g.normal, new Color(.78f, .5f, .24f), 3f); if (q != null) Destroy(q, 8f); }
                 col = null;
             }
-            if (lamp != null) lamp.intensity = age < 2.5f ? 2.5f + Mathf.PerlinNoise(Time.time * 6f, 0) : Mathf.MoveTowards(lamp.intensity, 0, Time.deltaTime * 4f);
+            if (lamp != null) lamp.intensity = age < 2.5f ? 3.5f + Mathf.PerlinNoise(Time.time * 6f, 0) : Mathf.MoveTowards(lamp.intensity, 0, Time.deltaTime * 4f);
             if (age > 4.5f) Destroy(gameObject);
         }
     }

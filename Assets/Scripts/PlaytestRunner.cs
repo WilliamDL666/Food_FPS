@@ -533,6 +533,8 @@ namespace NeonSiege
                 yield return V22LinkTests();                         // V22 第三期：干员 × 地图联动 + 团队标记 + 大招预警（M46–M54）
                 if (ToonAssets.Available) yield return V23CombatTests();   // V23 a + c：视线 / 爆炸拆分、曼妥思喷泉、技能 / 大招美食表现（M55–M60）
                 yield return MapUiTests.Run(Check);                  // V23 b：地图 UI + 食材高亮（M70–M76，MapUiTests.cs）
+                yield return LinkTests.Run(Check);                   // V23 d：联动放大 + 副联动 + 硬约束（M85 起，LinkTests.cs）
+                if (ToonAssets.Available) yield return V23PolishTests();   // V23 打磨：大招远景 / 可乐喷泉 / 食材光柱 / 左手道具 / 大地图（M77）
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
 
@@ -1101,6 +1103,12 @@ namespace NeonSiege
             var cam = Camera.main;
             ForceLive();
             var p = m.player;
+            if (System.Environment.CommandLine.Contains("-neonLinkShots"))   // V23 d：只拍联动截图（节省时间）
+            {
+                yield return new WaitForSeconds(1f);
+                if (p != null) yield return LinkTests.Shots(dir, Grab);
+                Debug.Log("NEON_SHOTS_DONE " + dir); Application.Quit(0); yield break;
+            }
             Place(Other(1, 0), new Vector3(-24, .05f, 4), -100);
             Place(Other(1, 1), new Vector3(-22, .05f, 6.5f), -70);
             Place(Other(0, 1), new Vector3(-27, .05f, 2.2f), 60);
@@ -1280,6 +1288,7 @@ namespace NeonSiege
             if (p != null) yield return LinkShots(dir);  // V22 第三期：6 个联动瞬间 + 联动提示 + 标记 + 大招预警（48–57）
             if (p != null && ToonAssets.Available) yield return V23SkillShots(dir);   // V23 c：6 技能 + 6 大招施放瞬间、曼妥思喷泉、蒸汽里被炸（60–74）
             if (p != null) yield return MapUiTests.Shots(dir, Grab);   // V23 b：小地图跟随 / 北向、大地图、食材光柱 / 边缘箭头 / 交火变淡（80–86，MapUiTests.cs）
+            if (p != null) yield return LinkTests.Shots(dir, Grab);    // V23 d：整片蒸汽内外 / 芥末呛雾 / 开大火 / 副联动 / 门洞（90–98，LinkTests.cs）
             // V9 menus
             m.ui.preview = 1; for (int f = 0; f < 3; f++) yield return null;
             yield return Grab(System.IO.Path.Combine(dir, "17_main_menu.png"));
@@ -1430,9 +1439,10 @@ namespace NeonSiege
                 cdLeft = valve.CooldownLeft; cdOk = cdLeft > SteamValve.Cooldown - SteamValve.Duration - 1.5f && cdLeft < SteamValve.Cooldown - SteamValve.Duration + .5f;
                 valve.ResetRound(); SteamCloud.ClearTimed();
             }
-            Check("M42", "蒸汽阀：中庭 ×2 + 南后厨 ×1；长按 G 0.5 s 喷白雾，穿过白雾的视线被挡；6 s 后散开；冷却 25 s 内不能再拧",
-                SteamValve.Valves.Count == 3 && valve != null && clearBefore && fired && Mathf.Abs(held - SteamValve.HoldSecs) < .15f && blocks && noReuse && clearAfter && cdOk,
-                "蒸汽阀 " + SteamValve.Valves.Count + " 个，喷前视线通=" + clearBefore + "，长按 " + held.ToString("0.00") + " s 喷出=" + fired + "，白雾挡视线=" + blocks + "，冷却中不能再用=" + noReuse + "，6.3 s 后散开=" + clearAfter + "，剩余冷却 " + cdLeft.ToString("0.0") + " s");
+            int plainValves = 0; foreach (var v in SteamValve.Valves) if (v != null && !(v is HotpotKnob)) plainValves++;   // V23 d：另有关口火锅"开大火"旋钮（也是 SteamValve）
+            Check("M42", "蒸汽阀：中庭 ×2 + 南后厨 ×1；长按 G 0.5 s 喷整片白雾，穿过白雾的视线被挡；" + SteamValve.Duration + " s 后散开；冷却 " + SteamValve.Cooldown + " s 内不能再拧（V23 d 新数值）",
+                plainValves == 3 && valve != null && clearBefore && fired && Mathf.Abs(held - SteamValve.HoldSecs) < .15f && blocks && noReuse && clearAfter && cdOk,
+                "蒸汽阀 " + plainValves + " 个（+ 开大火旋钮 " + (SteamValve.Valves.Count - plainValves) + "），喷前视线通=" + clearBefore + "，长按 " + held.ToString("0.00") + " s 喷出=" + fired + "，白雾挡视线=" + blocks + "，冷却中不能再用=" + noReuse + "，" + (SteamValve.Duration + .3f).ToString("0.0") + " s 后散开=" + clearAfter + "，剩余冷却 " + cdLeft.ToString("0.0") + " s");
 
             // ---------------- M43：蒸笼门
             var gN = ar.Gate(1); var gS = ar.Gate(-1);
@@ -1697,33 +1707,38 @@ namespace NeonSiege
                 baseNo && link50 && holeW >= 2.4f && holeH >= 2f && pathAfter > 0 && pathAfter < 9f && (pathBefore < 0 || pathBefore > pathAfter + 2f) && rivetCan && Links.Total[4] == brLinks0 + 1,
                 "不联动没洞=" + baseNo + "，联动开洞=" + link50 + "（" + holeW.ToString("0.0") + " × " + holeH.ToString("0.0") + " m）、墙两侧路线 " + (pathBefore < 0 ? "不通" : pathBefore.ToString("0") + " m") + " → " + pathAfter.ToString("0.0") + " m，铆钉能补=" + rivetCan);
 
-            // ---------------- M51：棉花糖蒸汽（迷雾罩住正在喷的蒸汽阀 → 中心 4 m 不透明，挡视线；没有蒸汽的迷雾不会变；冰淇淋散热气后一起散）
+            // ---------------- M51：棉花糖蒸汽（V23 d：迷雾罩住火锅热气 → 整片粉色棉花糖蒸汽，半径 = 整片蒸汽；罩住正在喷的阀门 → 原地变粉；没有蒸汽的迷雾不变；冰淇淋散热气后一起散）
             Skills.ClearRound(); SteamCloud.ClearTimed(); yield return null;
-            SteamValve valve = null; foreach (var v in SteamValve.Valves) if (v != null && Flat(v.transform.position, new Vector3(16, 0, 8)) < 1f) valve = v;
+            SteamValve valve = null; foreach (var v in SteamValve.Valves) if (v != null && !(v is HotpotKnob) && Flat(v.transform.position, new Vector3(16, 0, 8)) < 1f) valve = v;
             var ph = NpcOr(att, 2); if (ph.role != Role.Phantom) ph.ChangeRole(Role.Phantom);
-            bool before51 = true, candy51 = false, blocks51 = false, farNo = false, lifeOk = false, dispersed = false; int puffs = 0; int steamLinks0 = Links.Total[5];
-            if (valve != null)
+            bool before51 = true, candy51 = false, blocks51 = false, farNo = false, lifeOk = false, dispersed = false, valvePink = false, radiusOk = false; float r51 = 0; int steamLinks0 = Links.Total[5];
+            if (potN != null && valve != null)
             {
-                valve.ResetRound(); valve.Fire(null); yield return null;
-                Vector3 c = valve.CloudCenter; Vector3 la = c + new Vector3(-6, 0, 3.3f), lb = c + new Vector3(6, 0, 3.3f);   // 离中心 3.3 m：阀门白雾（有效 2.7 m）挡不住，棉花糖蒸汽（4 m）挡得住
+                Vector3 c = potN.SteamCenter; Vector3 la = c + new Vector3(-9, 0, 6f), lb = c + new Vector3(9, 0, 6f);   // 离中心 6 m：火锅常驻热气（2.6 m）挡不住，整片棉花糖蒸汽（9 m）挡得住
                 before51 = SteamCloud.Blocks(la, lb);
                 int live0 = CandySteam.Live.Count;
                 var far = new GameObject("测试迷雾·远"); far.transform.position = new Vector3(-40, 0, -4); var nf = far.AddComponent<NoiseField>(); nf.Init(ph); Skills.spawned.Add(far);
                 yield return new WaitForSeconds(.5f);
                 farNo = CandySteam.Live.Count == live0 && Links.Total[5] == steamLinks0;
-                var near = new GameObject("测试迷雾·阀"); near.transform.position = valve.transform.position + new Vector3(0, 0, -4f); var nn = near.AddComponent<NoiseField>(); nn.Init(ph); Skills.spawned.Add(near);
+                var near = new GameObject("测试迷雾·锅"); near.transform.position = potN.transform.position + new Vector3(0, 0, -4f); var nn = near.AddComponent<NoiseField>(); nn.Init(ph); Skills.spawned.Add(near);
+                yield return new WaitForSeconds(1.4f);
+                CandySteam cs = null; foreach (var x in CandySteam.Live) if (x != null && x.key == potN) cs = x;
+                candy51 = cs != null && cs.area != null && cs.area.Candy; blocks51 = SteamCloud.Blocks(la, lb);
+                if (cs != null) { r51 = cs.area.R; radiusOk = Mathf.Approximately(r51, Config.SteamAreaPot) && Config.CandySteamRadius >= Config.SteamAreaMid - .01f; lifeOk = cs.until <= nn.EndsAt + .01f && cs.until - Time.time <= Config.CandySteamLife; }
+                // 正在喷的中庭阀门被迷雾罩住 → 原地变粉（不另开一片，不占盲区上限）
+                valve.ResetRound(); valve.Fire(null); int blind0 = SteamArea.BlindCount;
+                var nv = new GameObject("测试迷雾·阀"); nv.transform.position = valve.transform.position + new Vector3(0, 0, -4f); nv.AddComponent<NoiseField>().Init(ph); Skills.spawned.Add(nv);
                 yield return new WaitForSeconds(.6f);
-                CandySteam cs = null; foreach (var x in CandySteam.Live) if (x != null && x.key == valve) cs = x;
-                candy51 = cs != null; blocks51 = SteamCloud.Blocks(la, lb);
-                if (cs != null) { puffs = cs.GetComponentsInChildren<Renderer>().Length; lifeOk = cs.until <= nn.EndsAt + .01f && cs.until - Time.time <= Config.CandySteamLife; }
+                valvePink = valve.area != null && valve.area.Candy && SteamArea.BlindCount == blind0;
                 SteamCloud.Suppress(.6f); yield return null; yield return null;
-                dispersed = !CandySteam.Active(valve) && !SteamCloud.Blocks(la, lb);
-                yield return new WaitForSeconds(.8f); SteamCloud.Tick();
-                Destroy(far); Destroy(near); valve.ResetRound(); SteamCloud.ClearTimed();
+                yield return new WaitForSeconds(Config.SteamCloseFade + .2f); SteamCloud.Tick();
+                dispersed = !CandySteam.Active(potN) && !SteamCloud.Blocks(la, lb);
+                Destroy(far); Destroy(near); Destroy(nv); valve.ResetRound(); SteamCloud.ClearTimed();
+                yield return new WaitForSeconds(.7f); SteamCloud.Tick();
             }
-            Check("M51", "棉花糖蒸汽：迷雾罩住正在喷的蒸汽阀 → 中心 " + Config.CandySteamRadius + " m 不透明、穿过的视线被 SteamCloud.Blocks 挡住（阀门白雾本身挡不住这条线）；没罩住蒸汽的迷雾不变；持续 ≤ " + Config.CandySteamLife + " s 且不超过迷雾；冰淇淋散热气后一起散",
-                !before51 && farNo && candy51 && blocks51 && puffs >= 8 && lifeOk && dispersed && Links.Total[5] == steamLinks0 + 1,
-                "联动前这条线被挡=" + before51 + "，远处迷雾不变=" + farNo + "，棉花糖蒸汽=" + candy51 + "（" + puffs + " 个渲染块），挡视线=" + blocks51 + "，时长合规=" + lifeOk + "，冰淇淋后散开=" + dispersed);
+            Check("M51", "棉花糖蒸汽（V23 d 新数值）：迷雾罩住火锅热气 → 整片粉色棉花糖蒸汽，半径 = 整片蒸汽 " + Config.SteamAreaPot + " m，离中心 6 m 的视线被挡（常驻热气挡不住这条线）；罩住正在喷的阀门 → 原地变粉、不多占一片；没罩住蒸汽的迷雾不变；持续 ≤ " + Config.CandySteamLife + " s 且不超过迷雾；冰淇淋散热气后一起散",
+                !before51 && farNo && candy51 && blocks51 && radiusOk && lifeOk && valvePink && dispersed && Links.Total[5] >= steamLinks0 + 1,
+                "联动前这条线被挡=" + before51 + "，远处迷雾不变=" + farNo + "，棉花糖蒸汽=" + candy51 + "（半径 " + r51.ToString("0.0") + " m）、挡视线=" + blocks51 + "，时长合规=" + lifeOk + "，阀门原地变粉=" + valvePink + "，冰淇淋后散开=" + dispersed);
 
             // ---------------- M52：联动可读（只给能联动的英雄显示）
             bool tableOk = true, lenOk = true; string tbl = "";
@@ -2556,6 +2571,49 @@ namespace NeonSiege
             p.scripted = false; Hush(p); FP(); p.Respawn(new Vector3(-44, .05f, 3.5f), 92);
             HudCaptureBegin.Allow = false;
             yield return null;
+        }
+
+        // ================================================================ V23 打磨（M77）：只改表现 —— 大招远景光柱、可乐喷泉 6 层、食材光柱加宽 + 描边、左手道具放大不进准星区、大地图图标 ×1.4
+        IEnumerator V23PolishTests()
+        {
+            var m = Match.I; var p = m.player;
+            if (p == null) { Check("M77", "V23 视觉打磨", false, "没有玩家角色"); yield break; }
+            // 1 大招：M59 已施放 6 个大招，每个至少 1 根光柱；再手动放 1 根看对象确实生成
+            UltFx.Beacon(p.transform.position + p.transform.forward * 8f, UltFx.JellyHot, Color.black, 10f, 2f, .5f);
+            yield return null;
+            bool beaconObj = GameObject.Find("大招光柱") != null;
+            bool ultOk = UltFx.Beacons >= 7 && UltFx.BeaconMaxH >= 7f && beaconObj;
+            // 2 可乐喷泉：1 s 后 6 层粒子都在（含顶部泡沫花），水柱是亮焦糖色（不是深棕）
+            var cf = ColaFountain.Spawn(p.transform.position + p.transform.forward * 10f);
+            yield return new WaitForSeconds(1f);
+            int layers = 0, live = 0;
+            foreach (var ps in cf.GetComponentsInChildren<ParticleSystem>()) { if (System.Array.IndexOf(ColaFountain.Layers, ps.name) >= 0 && ps.particleCount > 0) layers++; live += ps.particleCount; }
+            var cc = ColaFountain.Caramel; float lum = cc.r * .3f + cc.g * .59f + cc.b * .11f;
+            Object.Destroy(cf.gameObject);
+            bool colaOk = layers == ColaFountain.Layers.Length && lum > .5f;
+            // 3 食材光柱：主 ≥ 2.5 m + 深色描边，备选更窄
+            bool beamOk = IngredientGuide.PrimaryWidth >= 2.5f && IngredientGuide.AltWidth < IngredientGuide.PrimaryWidth && IngredientGuide.HaloScale > 1f
+                && (IngredientGuide.LastPrimaryWidth <= 0 || IngredientGuide.LastPrimaryWidth >= 2.5f);
+            // 4 左手道具：6 个技能各放一次，道具 ≥ 6 cm，包围盒不进屏幕中心 ±12%
+            int placed0 = SkillHand.PropPlaced; bool inCenter = false; float minSize = 9f; string centerRoles = "";
+            foreach (var r in V23Roles)
+            {
+                SkillHand.Play(p, r);
+                for (int i = 0; i < 6; i++) { yield return null; var h = p.GetComponent<SkillHand>(); if (h != null && h.PropInCenter()) { inCenter = true; centerRoles += r + " "; break; } }
+                if (SkillHand.PropPlaced > placed0) minSize = Mathf.Min(minSize, SkillHand.LastPropSize);
+                yield return new WaitForSeconds(.65f);
+            }
+            bool placed = SkillHand.PropPlaced > placed0;
+            bool handOk = SkillHand.PropScale >= 2.4f && (!placed || (!inCenter && minSize >= .06f));
+            // 5 大地图
+            bool mapOk = MapUI.BigIconScale >= 1.3f && MapUI.BigIconScale <= 1.5f && MapBase.HatchBlend <= .15f && MapBase.ShadowMul < 1f && Mathf.Approximately(MapIcons.Scale, 1f);
+            Check("M77", "V23 视觉打磨（只改表现）：每个大招有 Additive 远景光柱（≥ 7 m）；可乐喷泉 6 层（水柱 / 发光芯 / 泡沫 / 气泡 / 泡沫花 / 底部泡沫）且水柱是亮焦糖色；食材主光柱 ≥ 2.5 m 带深色描边、备选更窄；左手道具 ≥ 6 cm 且不进准星区；大地图图标 ×1.3–1.5、斜纹 ≤ 0.15、有投影",
+                ultOk && colaOk && beamOk && handOk && mapOk,
+                "光柱 " + UltFx.Beacons + " 根（最高 " + UltFx.BeaconMaxH.ToString("0") + " m）；喷泉 " + layers + "/" + ColaFountain.Layers.Length + " 层、" + live + " 个粒子、亮度 " + lum.ToString("0.00")
+                + "；主光柱 " + IngredientGuide.PrimaryWidth + " m（最近一次实测 " + IngredientGuide.LastPrimaryWidth.ToString("0.0") + "）/ 备选 " + IngredientGuide.AltWidth + " m"
+                + "；道具贴手 " + (SkillHand.PropPlaced - placed0) + " 帧、最小 " + (placed ? (minSize * 100).ToString("0") + " cm" : "-") + "、进准星区=" + inCenter + (centerRoles.Length > 0 ? "（" + centerRoles.Trim() + "）" : "")
+                + "；大地图图标 ×" + MapUI.BigIconScale + "、斜纹 " + MapBase.HatchBlend);
+            SkillPop.EdgeBubbles = 0;
         }
     }
 

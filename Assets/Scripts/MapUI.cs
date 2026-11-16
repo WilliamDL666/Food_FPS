@@ -239,6 +239,8 @@ namespace NeonSiege
                 }
         }
         static K KAt(int cx, int cz) { if (cx < 0 || cz < 0 || cx >= Cols || cz >= Rows) return K.Void; return (K)(Class[cz * Cols + cx] & 0x7f); }
+        static bool Open(K k) { return k == K.Ground || k == K.Flat || k == K.Platform; }
+        public const float HatchBlend = .12f, TopLight = .3f, ShadowMul = .8f;   // V23 打磨：斜纹 0.28 → 0.12；顶面高光 / 投影
         static void Compose(int x0, int z0, int x1, int z1)
         {
             bool food = Food;
@@ -272,7 +274,17 @@ namespace NeonSiege
                             if (k == K.Platform) { if (n != K.Platform && n != K.Void) drip = true; }
                             else if (n == K.Ground || n == K.Flat || n == K.Platform) edge = true;
                         }
-                    if (over) { int s = ((cx + cz) % 6); if (s == 0) c = Color.Lerp(c, food ? new Color(.85f, .55f, .72f) : new Color(.35f, .38f, .45f), .28f); }
+                    // V23 打磨：立体感 —— 建筑内侧左上一圈顶面高光、右下一圈压暗；地面上建筑的右下方 2 格投影
+                    if (IsBuildingColor(k))
+                    {
+                        if (Open(KAt(cx - 2, cz)) || Open(KAt(cx, cz + 2)) || Open(KAt(cx - 1, cz)) || Open(KAt(cx, cz + 1))) c = Color.Lerp(c, Color.white, TopLight);
+                        else if (Open(KAt(cx + 2, cz)) || Open(KAt(cx, cz - 2))) c *= .9f;
+                    }
+                    else if (k == K.Ground || k == K.Flat || k == K.Platform)
+                    {
+                        if (IsBuildingColor(KAt(cx - 1, cz + 1)) || IsBuildingColor(KAt(cx - 2, cz + 2))) c *= ShadowMul;
+                    }
+                    if (over) { int s = ((cx + cz) % 6); if (s == 0) c = Color.Lerp(c, food ? new Color(.85f, .55f, .72f) : new Color(.35f, .38f, .45f), HatchBlend); }
                     Color cm = Color.Lerp(c, new Color(.5f, .5f, .5f) * (c.r + c.g + c.b) / 1.5f, .5f);
                     if (edge) { c = Edge; cm = Edge; } else if (drip) { c = Drip; cm = Drip; }
                     c.a = 1; cm.a = 1;
@@ -589,9 +601,11 @@ namespace NeonSiege
 
         public static void Draw(Rect r, Texture2D t, Color tint) { var o = GUI.color; GUI.color = tint; GUI.DrawTexture(r, t, ScaleMode.StretchToFill, true); GUI.color = o; }
         public static HashSet<string> Recording;   // 测试：小地图这一帧画了哪些图标（贴图名）
+        public static float Scale = 1f;   // V23 打磨：大地图期间 = MapUI.BigIconScale
         public static void Draw(Vector2 c, float size, Texture2D t, Color tint, float rotDeg = 0)
         {
             if (Recording != null && t != null) Recording.Add(t.name);
+            size *= Scale;
             if (Mathf.Abs(rotDeg) > .01f) { var m = GUI.matrix; CombatHud.RotP(rotDeg, c); Draw(new Rect(c.x - size / 2, c.y - size / 2, size, size), t, tint); GUI.matrix = m; }
             else Draw(new Rect(c.x - size / 2, c.y - size / 2, size, size), t, tint);
         }
@@ -760,7 +774,13 @@ namespace NeonSiege
         }
 
         // ================================================================ 大地图 M：全图 + 区域名 + 图层开关
+        public const float BigIconScale = 1.4f;   // V23 打磨：大地图图标 ×1.4（小地图不变）
         public static void DrawBigMap(Rect r, Fighter p)
+        {
+            MapIcons.Scale = BigIconScale;
+            try { DrawBigMapInner(r, p); } finally { MapIcons.Scale = 1f; }
+        }
+        static void DrawBigMapInner(Rect r, Fighter p)
         {
             Styles();
             var m = Match.I; if (m == null || p == null) return;
@@ -836,10 +856,8 @@ namespace NeonSiege
                 MapGL.Disc(a, r * k, col);
                 if (total > 0) MapGL.Ring(a, r * k, 2, new Color(col.r, col.g, col.b, .9f), 0, 360 * Mathf.Clamp01(left / total));
             }
-            foreach (var sv in SteamValve.Valves) if (sv != null && sv.Active) Area(sv.transform.position, SteamValve.Radius, new Color(1f, 1f, 1f, .45f), 0, 0);
-            foreach (var cs in CandySteam.Live) if (cs != null) Area(cs.center, Config.CandySteamRadius, new Color(1f, .65f, .9f, .45f), cs.until - Time.time, Config.CandySteamLife);
+            foreach (var z in LinkPlus.MapAreas()) Area(z.c, z.r, z.col, z.left, z.total);   // V23 d：整片蒸汽 / 棉花糖蒸汽 / 蛋糕粉尘 / 芥末呛雾（含剩余时间环，双方都画）
             foreach (var nf in NoiseField.Live) if (nf != null) Area(nf.transform.position, Config.NoiseRadius, new Color(.9f, .5f, 1f, .35f), nf.EndsAt - Time.time, Config.NoiseLife);
-            foreach (var hz in HotpotHazard.All) if (hz != null && Links.PotDrone(hz) != null) Area(hz.transform.position, Config.MustardPotRadius, new Color(.75f, .9f, .25f, .35f), 0, 0);
         }
         static void Structures(MapView v, Fighter p, bool big)
         {
@@ -890,7 +908,7 @@ namespace NeonSiege
                     bool lit = m.Planted && m.plantedSite == s;
                     Vector2 ic = v.Clamp(a, 12);
                     MapIcons.Draw(ic, sz * (lit && Mathf.Repeat(Time.time * 2, 1) < .5f ? 1.15f : 1f), MapIcons.Cake(lit), Color.white);
-                    Txt(new Rect(ic.x - 12, ic.y - sz * .72f - 8, 24, 16), s == 0 ? "A" : "B", big ? lblBig : lbl, col);
+                    Txt(new Rect(ic.x - 12, ic.y - sz * MapIcons.Scale * .72f - 8, 24, 16), s == 0 ? "A" : "B", big ? lblBig : lbl, col);
                     if (big) LastIconPos["site" + s] = a;
                 }
                 // 出生点（餐盘）

@@ -58,7 +58,7 @@ namespace NeonSiege
         public float yaw, pitch;
         public bool crouching, aiming, sprinting, grounded;
         public Vector3 velocity;
-        public float revealedUntil, hiddenFromScanUntil, jammedUntil;
+        public float revealedUntil, hiddenFromScanUntil, jammedUntil, mustardUntil;   // V23 d：mustardUntil = 在敌方芥末呛雾里
         // V18：美食大作战（食材、变身、大招……都在 FoodState 里）
         public float freezeUntil; FoodState food; bool crouchToggle;
         // V20：角色 / 枪械 / 3C
@@ -303,7 +303,7 @@ namespace NeonSiege
             yaw = faceYaw; pitch = 0; transform.rotation = Quaternion.Euler(0, yaw, 0);
             alive = true; hp = Config.MaxHp; armor = Config.MaxArmor; ammo = W.magazine; skillCharges = Hero.skill.maxCharges; skillRechargeAt = 0; guardUntil = 0;
             reloadEndAt = 0; bloom = 0; verticalSpeed = 0; velocity = Vector3.zero; mantling = false; slideUntil = 0; recoilDebt = 0; landDip = 0; lean = 0; botLean = 0; grenades = 1; sprayShots = 0; meleeUntil = 0; crouching = aiming = sprinting = false; adsToggle = false;
-            revealedUntil = hiddenFromScanUntil = jammedUntil = shieldActiveUntil = dashUntil = aimRecoveryUntil = 0;
+            revealedUntil = hiddenFromScanUntil = jammedUntil = shieldActiveUntil = dashUntil = aimRecoveryUntil = mustardUntil = 0;
             damagedBy.Clear(); usingInteract = null; burstLeft = 0; bombBusy = false; roundKills = 0;
             stats.Clear();
             if (avatar != null) avatar.Revive();
@@ -411,7 +411,7 @@ namespace NeonSiege
             if (human && (IsReloading || bombBusy || Dashing)) adsToggle = false;
             sprinting = wantSprint && !aiming && (!crouching || Sliding) && !trigger && wish.sqrMagnitude > .1f && !ShieldUp && !mantling && !prone && !exhausted && stamina > 0;
             // V20：体力 —— 冲刺消耗，停下一会儿后恢复；耗尽后要恢复到一定值才能再冲刺
-            if (sprinting && !Sliding) { stamina = Mathf.Max(0, stamina - Tune.SprintDrain * Time.deltaTime); staminaUsedAt = Time.time; if (stamina <= 0) { if (!exhausted) { stats.exhaustCount++; exhaustedAt = Time.time; } exhausted = true; } }
+            if (sprinting && !Sliding) { stamina = Mathf.Max(0, stamina - Tune.SprintDrain * (Time.time < mustardUntil ? Config.MustardSprintDrain : 1f) * Time.deltaTime); staminaUsedAt = Time.time; if (stamina <= 0) { if (!exhausted) { stats.exhaustCount++; exhaustedAt = Time.time; } exhausted = true; } }
             else if (Time.time - staminaUsedAt > Tune.RegenDelay) stamina = Mathf.Min(Tune.StaminaMax, stamina + Tune.StaminaRegen * Time.deltaTime);
             if (exhausted && stamina >= Tune.ExhaustRecover) { exhausted = false; staminaRecoveredAt = Time.time; }   // V22：过线那一刻状态带闪一下
             bool staminaFull = stamina >= Tune.StaminaMax - .5f;
@@ -438,6 +438,7 @@ namespace NeonSiege
             if (ShieldUp) speed *= Config.ShieldMoveMultiplier;
             if (ShieldWall.Docked.Count > 0 && ShieldWall.InCurtain(transform.position)) speed *= Config.ShieldDockPassSlow;   // V22 第三期：穿过果冻门帘时变慢
             if (Time.time < jammedUntil) speed *= Config.NoiseSlow;
+            if (Time.time < mustardUntil) speed *= Config.MustardSlow;   // V23 d：芥末呛雾减速
             if (Time.time < creamUntil) speed *= .85f;
             if (ToonAssets.Available) speed *= Food.SpeedMul();
             if (Time.time < freezeUntil) speed *= .1f;   // 被冰淇淋冻住

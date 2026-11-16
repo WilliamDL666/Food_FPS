@@ -38,7 +38,11 @@ namespace NeonSiege
         float nextRefresh, lastBump = -99; int lastLiveCount = -1; bool reportDone;
         IngredientPickup prevPrimary; float prevPrimaryDist = 99; int prevHeldCount;
 
-        class Beam { public GameObject root; public Transform outer, core, icon, ring; public Renderer ro, rc, ri, rr; }
+        class Beam { public GameObject root; public Transform outer, core, icon, ring, halo, iconBack, ringDark, ringGlow; public Renderer ro, rc, ri, rr, rh, rib, rg; }
+        // V23 打磨：主光柱 Additive 发光 + 深色外描边（粉白街景上拉开对比），宽 ≥ 2.8 m；图标放大并加深色圆底；12 m 内的地面光圈加大 + 发光内盘 + 深色外环。备选仍弱一档（无描边 / 无白芯）
+        public const float PrimaryWidth = 2.8f, AltWidth = 1.5f, HaloScale = 1.5f;
+        public static readonly Color HaloColor = new Color(.24f, .04f, .17f);
+        public static float LastPrimaryWidth; public static bool LastHalo;   // 测试读
         readonly Dictionary<IngredientPickup, Beam> beams = new Dictionary<IngredientPickup, Beam>();
         static Material beamMatBase; static Texture2D beamTex;
         CommandBuffer cb; Camera cbCam; Material xray;
@@ -214,11 +218,15 @@ namespace NeonSiege
                 r.shadowCastingMode = ShadowCastingMode.Off; r.receiveShadows = false; return q.transform;
             }
             Color col = Ingredients.Col(ip.id);
-            b.outer = Quad("外光", new Material(BeamMat) { color = new Color(col.r, col.g, col.b, .55f) }, out b.ro);
-            b.core = Quad("白芯", new Material(BeamMat) { color = new Color(1, 1, 1, .8f) }, out b.rc);
-            b.icon = Quad("图标", new Material(Shader.Find("Sprites/Default")) { mainTexture = MapIcons.Ingredient(ip.id), renderQueue = 3101 }, out b.ri);
+            b.halo = Quad("外描边", new Material(BeamMat) { color = new Color(HaloColor.r, HaloColor.g, HaloColor.b, .5f), renderQueue = 3099 }, out b.rh);
+            b.outer = Quad("外光", UltFx.AddMat(beamTex, new Color(col.r, col.g, col.b, .8f)), out b.ro);
+            b.core = Quad("白芯", UltFx.AddMat(beamTex, new Color(1, 1, 1, .9f)), out b.rc);
+            b.iconBack = Quad("图标底", new Material(Shader.Find("Sprites/Default")) { mainTexture = UltFx.DiscTex, renderQueue = 3101, color = new Color(HaloColor.r, HaloColor.g, HaloColor.b, .75f) }, out b.rib);
+            b.icon = Quad("图标", new Material(Shader.Find("Sprites/Default")) { mainTexture = MapIcons.Ingredient(ip.id), renderQueue = 3102 }, out b.ri);
+            b.ringDark = Quad("地面外环", ToonAssets.RingMaterial(HaloColor), out _);
+            b.ringGlow = Quad("地面发光", UltFx.AddMat(UltFx.DiscTex, new Color(col.r, col.g, col.b, .9f)), out b.rg);
             b.ring = Quad("地面光圈", ToonAssets.RingMaterial(Color.Lerp(col, Color.white, .3f)), out b.rr);
-            b.ring.localRotation = Quaternion.Euler(90, 0, 0);
+            b.ring.localRotation = b.ringDark.localRotation = b.ringGlow.localRotation = Quaternion.Euler(90, 0, 0);
             return b;
         }
         void UpdateBeams(Fighter p)
@@ -240,16 +248,26 @@ namespace NeonSiege
                 bool near = d <= LockRange;
                 float h = prim ? BeamHeight : AltBeamHeight, a = Alpha * (prim ? 1f : .4f);
                 b.outer.gameObject.SetActive(!near); b.core.gameObject.SetActive(!near && prim); b.icon.gameObject.SetActive(!near && prim);
-                b.ring.gameObject.SetActive(near && prim);
+                b.halo.gameObject.SetActive(!near && prim); b.iconBack.gameObject.SetActive(!near && prim);
+                b.ring.gameObject.SetActive(near && prim); b.ringDark.gameObject.SetActive(near && prim); b.ringGlow.gameObject.SetActive(near && prim);
                 // 圆柱式朝向相机
-                Vector3 to = cp - g; to.y = 0; var rot = to.sqrMagnitude > .01f ? Quaternion.LookRotation(-to) : Quaternion.identity;
-                float wScale = Mathf.Clamp(d * .02f, .6f, 1.6f);   // 远处稍粗，保证 60 m 外能看到
-                b.outer.localPosition = Vector3.up * h / 2; b.outer.rotation = rot; b.outer.localScale = new Vector3((prim ? 2.4f : 1.3f) * wScale, h, 1);
-                b.core.localPosition = Vector3.up * h / 2; b.core.rotation = rot; b.core.localScale = new Vector3(.55f * wScale, h, 1);
-                b.icon.localPosition = Vector3.up * (h + .5f); b.icon.rotation = cam != null ? Quaternion.LookRotation(b.icon.position - cp) : rot; b.icon.localScale = Vector3.one * 1.6f * wScale;
-                var oc = b.ro.sharedMaterial.color; oc.a = .8f * a; b.ro.sharedMaterial.color = oc;
-                var cc = b.rc.sharedMaterial.color; cc.a = .95f * a; b.rc.sharedMaterial.color = cc;
-                b.ring.localPosition = Vector3.up * .04f; b.ring.localScale = Vector3.one * (1.9f + .2f * Mathf.Sin(Time.time * 5f));
+                Vector3 to = cp - g; to.y = 0; var rot = to.sqrMagnitude > .01f ? Quaternion.LookRotation(-to) : Quaternion.identity; Vector3 away = rot * Vector3.forward;
+                float wScale = Mathf.Clamp(d * .02f, 1f, 1.8f);   // 近处也 ≥ 2.8 m；远处稍粗，保证 60 m 外能看到
+                float bw = (prim ? PrimaryWidth : AltWidth) * wScale;
+                b.halo.localPosition = Vector3.up * h / 2 + away * .08f; b.halo.rotation = rot; b.halo.localScale = new Vector3(bw * HaloScale, h * 1.03f, 1);
+                b.outer.localPosition = Vector3.up * h / 2; b.outer.rotation = rot; b.outer.localScale = new Vector3(bw, h, 1);
+                b.core.localPosition = Vector3.up * h / 2 - away * .04f; b.core.rotation = rot; b.core.localScale = new Vector3(.8f * wScale, h, 1);
+                b.icon.localPosition = Vector3.up * (h + 1.4f * wScale); b.icon.rotation = cam != null ? Quaternion.LookRotation(b.icon.position - cp) : rot; b.icon.localScale = Vector3.one * 2.6f * wScale;
+                b.iconBack.position = b.icon.position + (b.icon.position - cp).normalized * .05f; b.iconBack.rotation = b.icon.rotation; b.iconBack.localScale = Vector3.one * 3.4f * wScale;
+                Color col = Ingredients.Col(ip.id); UltFx.Tint(b.ro.sharedMaterial, new Color(col.r, col.g, col.b, .85f * a));
+                UltFx.Tint(b.rc.sharedMaterial, new Color(1, 1, 1, .9f * a));
+                var hc = b.rh.sharedMaterial.color; hc.a = .8f * a; b.rh.sharedMaterial.color = hc;
+                var ic = b.ri.sharedMaterial.color; ic.a = a; b.ri.sharedMaterial.color = ic; var ibc = b.rib.sharedMaterial.color; ibc.a = .75f * a; b.rib.sharedMaterial.color = ibc;
+                float pulse = Mathf.Sin(Time.time * 5f);
+                b.ring.localPosition = Vector3.up * .05f; b.ring.localScale = Vector3.one * (2.6f + .25f * pulse);
+                b.ringDark.localPosition = Vector3.up * .04f; b.ringDark.localScale = Vector3.one * (3.1f + .25f * pulse);
+                b.ringGlow.localPosition = Vector3.up * .06f; b.ringGlow.localScale = Vector3.one * 2.2f; UltFx.Tint(b.rg.sharedMaterial, new Color(col.r, col.g, col.b, (.7f + .2f * pulse) * a));
+                if (prim) { LastPrimaryWidth = near ? 2.6f : bw; LastHalo = near ? b.ringDark.gameObject.activeSelf : b.halo.gameObject.activeSelf; }
             }
         }
 

@@ -582,6 +582,8 @@ namespace NeonSiege
         void Update()
         {
             if (broken || Match.I == null) return;
+            if (LinkPlus.Gummed(this)) { lamp.intensity = .25f; lamp.color = new Color(1f, .6f, .9f); return; }   // V23 d：被棉花糖糊住 → 迷雾期间失效
+            lamp.color = new Color(1f, .1f, .1f);
             float yaw = yawCenter + Mathf.Sin(Time.time * .5f) * 40f;
             transform.rotation = Quaternion.Euler(0, yaw, 0);
             head.localRotation = Quaternion.Euler(18, 0, 0);

@@ -97,12 +97,23 @@ namespace NeonSiege
         public const float TerminalHoldTime = 1.5f;
 
         // V22 第三期：干员 × 地图联动（设计稿_V22_地图重构与干员地图联动 §4.3，取区间内初版；原技能本体数值不变）
-        public static float DashPadBoost = 1.45f, DashPadWindow = .25f;                     // 猎隼 可乐弹射：水平 ×1.3–1.6；冲刺结束后 0.2–0.3 s 内仍算
+        public static float DashPadBoost = 1.6f, DashPadWindow = .25f;                     // 猎隼 可乐弹射：水平 ×1.3–1.6；冲刺结束后 0.2–0.3 s 内仍算
         public static float CoverPatchLife = 30f, CoverPatchDeploy = .9f, CoverPatchSnap = 2f, CoverPatchReach = 6f;   // 铆钉 嵌入补洞：25–35 s / 0.8–1.0 s / 吸附 1.5–2.5 m
         public static float ShieldDockHpMult = .9f, ShieldDockLife = 11f, ShieldDockPassSlow = .5f, ShieldDockMaxWidth = 5f, ShieldDockRange = 5f;   // 铁幕 果冻门帘
-        public static float MustardPotRadius = 6f, MustardPotLife = 6f, MustardPotLinger = 1f;   // 夜鸦 芥末辣锅：5–7 m / 5–7 s / 离开后 1 s
-        public static float BlastWallDoorHalf = 1.25f, BlastWallDoorHeight = 2.4f;           // 焚芯 开墙：粘在蛋糕墙上 → 落点正下方开 ≥ 2.5 × 2.4 m 的门洞（原 2.3 m 炸碎范围保留）
-        public static float CandySteamRadius = 4f, CandySteamLife = 6f;                      // 幻频 棉花糖蒸汽：3–4.5 m / 5–8 s（不超过迷雾剩余时间）
+        public static float MustardPotRadius = 12f, MustardPotLife = 9f, MustardPotLinger = 1f;   // 夜鸦 芥末辣锅：5–7 m / 5–7 s / 离开后 1 s
+        public static float BlastWallDoorHalf = 1.9f, BlastWallDoorHeight = 2.6f;           // 焚芯 开墙：粘在蛋糕墙上 → 落点正下方开 ≥ 2.5 × 2.4 m 的门洞（原 2.3 m 炸碎范围保留）
+        public static float CandySteamRadius = 9f, CandySteamLife = 8f;                      // 幻频 棉花糖蒸汽：3–4.5 m / 5–8 s（不超过迷雾剩余时间）
+        // V23 d：联动放大（设计稿_V23 §4.4 推荐档 + §5 副联动；拍板 4 乙 / 5 甲）
+        public static float SteamAreaMid = 9f, SteamAreaKitchen = 7f, SteamAreaPot = 9f;          // 整片蒸汽半径：中庭蒸汽阀 / 南后厨蒸汽阀 / 关口火锅"开大火"（判定半径 = 显示半径）
+        public static float SteamAreaLife = 10f, SteamAreaCooldown = 40f, SteamInsideSight = 2.5f; // 时长 / 冷却 / 雾里能看清的距离
+        public static float SteamBloom = 1f, SteamCloseFade = 1.75f, SteamCloseHold = .5f, KnobHold = .8f;   // 1 s 膨开；关阀后 1.75 s 散开；关阀长按 0.5 s；开大火长按 0.8 s
+        public static int SteamAreaMax = 2;                                                       // 硬约束：全图同时最多 2 片盲区（整片蒸汽 + 棉花糖蒸汽）
+        public static float MustardSpread = 1.75f, MustardSlow = .87f, MustardSprintDrain = 1.25f, MustardStationMul = .5f;   // 呛雾 1.75 s 扩到最大；雾里移速 ×0.87、冲刺耗体力 ×1.25；回血炉半径减半
+        public static float ColaImpactRadius = 3.5f, ColaImpactPush = 4.5f, ColaImpactShake = .5f;   // 可乐炸罐：3.5 m 内敌人被推开 4.5 m/s、准星晃 0.5 s，不掉血
+        public static float JellyStickTime = 2.5f;                                                // 果冻粘身：穿过门帘的敌人透视 2.5 s
+        public static float CakeDustRadius = 2.5f, CakeDustLife = 2.5f;                           // 开墙蛋糕粉尘（短时掩护，不算进盲区上限）
+        public static float WaferRampLife = 20f, WaferRampAngle = 30f, RampMinH = 2.1f, RampMaxH = 2.7f;   // 威化坡道：20 s、约 30° 可走坡，对准 2.2–2.6 m 高的边
+        public static float SauceChocoHot = 7f, SauceButterFire = 3.5f;                           // 点酱：巧克力 → 热巧克力 7 s；黄油 → 整条跑道着火 3.5 s（替代焦糖火）
         public static float PingLife = 6f, PingCooldown = .6f;                               // 团队标记
 
         public static readonly HeroSpec[] Heroes =
