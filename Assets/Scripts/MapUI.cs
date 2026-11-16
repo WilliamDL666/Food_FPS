@@ -853,11 +853,30 @@ namespace NeonSiege
             void Area(Vector3 c, float r, Color col, float left, float total)
             {
                 Vector2 a = v.Map(c); if (!v.Inside(a, -r * k)) return;
-                MapGL.Disc(a, r * k, col);
-                if (total > 0) MapGL.Ring(a, r * k, 2, new Color(col.r, col.g, col.b, .9f), 0, 360 * Mathf.Clamp01(left / total));
+                // V24：雾画成会翻滚的云 —— 中心一团 + 一圈 8 个慢慢转、一胀一缩的云朵（半径内，判定范围不变）
+                float rp = r * k, seed = c.x * .37f + c.z * .71f;
+                MapGL.Disc(a, rp * .78f, col);
+                for (int i = 0; i < 8; i++)
+                {
+                    float ang = i * 45f + Time.time * 14f + seed * 57f, pulse = .5f + .5f * Mathf.Sin(Time.time * 1.7f + i * 1.3f + seed);
+                    Vector2 q = CombatHud.ArcPoint(a, rp * (.62f + .06f * pulse), ang);
+                    MapGL.Disc(q, rp * (.3f + .08f * pulse), new Color(col.r, col.g, col.b, col.a * (.75f + .25f * pulse)), 20);
+                }
+                MapGL.Disc(a + new Vector2(Mathf.Sin(Time.time * .9f + seed), Mathf.Cos(Time.time * .7f + seed)) * rp * .15f, rp * .4f, new Color(Mathf.Min(1, col.r + .1f), Mathf.Min(1, col.g + .1f), Mathf.Min(1, col.b + .1f), col.a * .8f), 24);
+                if (total > 0) MapGL.Ring(a, rp, 2, new Color(col.r, col.g, col.b, .9f), 0, 360 * Mathf.Clamp01(left / total));
             }
             foreach (var z in LinkPlus.MapAreas()) Area(z.c, z.r, z.col, z.left, z.total);   // V23 d：整片蒸汽 / 棉花糖蒸汽 / 蛋糕粉尘 / 芥末呛雾（含剩余时间环，双方都画）
             foreach (var nf in NoiseField.Live) if (nf != null) Area(nf.transform.position, Config.NoiseRadius, new Color(.9f, .5f, 1f, .35f), nf.EndsAt - Time.time, Config.NoiseLife);
+            foreach (var z in V24.MapAreas()) Area(z.c, z.r, z.col, z.left, z.total);   // V24：爆米花云 / 冰面 / 溢锅红油 / 可乐水洼
+            // V24：当前干员能联动的机关 —— 每 10 s 闪一次金边（交火时不闪）
+            if (p != null && p.alive && ToonAssets.Available && V24.LinkFlash(p, out float fk))
+                foreach (var e in Links.ElementsFor(p.role))
+                {
+                    Vector2 a = v.Map(e.pos); if (!v.Inside(a, 4)) continue;
+                    float rr = (big ? 15f : 10f) + 6f * fk;
+                    MapGL.Ring(a, rr, big ? 3f : 2.2f, new Color(Links.Gold.r, Links.Gold.g, Links.Gold.b, 1f - fk));
+                    MapGL.Ring(a, rr * .7f, 1.5f, new Color(1f, .97f, .8f, (1f - fk) * .8f));
+                }
         }
         static void Structures(MapView v, Fighter p, bool big)
         {

@@ -14,6 +14,7 @@ namespace NeonSiege
     public class IngredientGuide : MonoBehaviour
     {
         public static IngredientGuide I;
+        public static float FarRange = 30f, FarWidth = 4f, IconHop = .9f, IconHopRate = 4.2f;   // V24：远处加宽 + 图标跳动
         public static float BeamHeight = 10f, AltBeamHeight = 6f;      // 8–12 m
         public static float ThroughWallAlpha = .38f;                   // 30–45%
         public static float SwitchRatio = .25f;                        // 近 20–30% 才换主目标
@@ -253,11 +254,13 @@ namespace NeonSiege
                 // 圆柱式朝向相机
                 Vector3 to = cp - g; to.y = 0; var rot = to.sqrMagnitude > .01f ? Quaternion.LookRotation(-to) : Quaternion.identity; Vector3 away = rot * Vector3.forward;
                 float wScale = Mathf.Clamp(d * .02f, 1f, 1.8f);   // 近处也 ≥ 2.8 m；远处稍粗，保证 60 m 外能看到
+                if (prim && d > FarRange) wScale = Mathf.Max(wScale, FarWidth / PrimaryWidth);   // V24：30 m 外主光柱加宽到 4 m
                 float bw = (prim ? PrimaryWidth : AltWidth) * wScale;
                 b.halo.localPosition = Vector3.up * h / 2 + away * .08f; b.halo.rotation = rot; b.halo.localScale = new Vector3(bw * HaloScale, h * 1.03f, 1);
                 b.outer.localPosition = Vector3.up * h / 2; b.outer.rotation = rot; b.outer.localScale = new Vector3(bw, h, 1);
                 b.core.localPosition = Vector3.up * h / 2 - away * .04f; b.core.rotation = rot; b.core.localScale = new Vector3(.8f * wScale, h, 1);
-                b.icon.localPosition = Vector3.up * (h + 1.4f * wScale); b.icon.rotation = cam != null ? Quaternion.LookRotation(b.icon.position - cp) : rot; b.icon.localScale = Vector3.one * 2.6f * wScale;
+                float hop = prim ? Mathf.Abs(Mathf.Sin(Time.time * IconHopRate)) * IconHop * wScale : 0f;   // V24：顶部图标一跳一跳
+                b.icon.localPosition = Vector3.up * (h + 1.4f * wScale + hop); b.icon.rotation = cam != null ? Quaternion.LookRotation(b.icon.position - cp) : rot; b.icon.localScale = Vector3.one * 2.6f * wScale;
                 b.iconBack.position = b.icon.position + (b.icon.position - cp).normalized * .05f; b.iconBack.rotation = b.icon.rotation; b.iconBack.localScale = Vector3.one * 3.4f * wScale;
                 Color col = Ingredients.Col(ip.id); UltFx.Tint(b.ro.sharedMaterial, new Color(col.r, col.g, col.b, .85f * a));
                 UltFx.Tint(b.rc.sharedMaterial, new Color(1, 1, 1, .9f * a));

@@ -68,20 +68,21 @@ namespace NeonSiege
                 {
                     Vector3 c = valve.CloudCenter, foeP = new Vector3(14.3f, 0, 8);
                     Place(D, foeP + Vector3.up * .05f, 0); D.hp = 100; D.armor = 50; yield return new WaitForFixedUpdate(); yield return null;
-                    bool sOut = Spot(foeP, 11f, g => Flat(g, c) > 9.6f, out Vector3 outP);
-                    bool sNear = Spot(foeP, 2f, g => Flat(g, c) < 8f, out Vector3 nearP);
-                    bool sFar = Spot(foeP, 3.6f, g => Flat(g, c) < 8f, out Vector3 farP);
+                    float R = Config.SteamAreaMid;   // V24：半径 9 → 13 m，几何取点都改成相对半径
+                    bool sOut = Spot(foeP, R + 2f, g => Flat(g, c) > R + .6f, out Vector3 outP);
+                    bool sNear = Spot(foeP, 2f, g => Flat(g, c) < R - 1f, out Vector3 nearP);
+                    bool sFar = Spot(foeP, 3.6f, g => Flat(g, c) < R - 1f, out Vector3 farP);
                     where = sOut + "/" + sNear + "/" + sFar;
                     Place(A, outP + Vector3.up * .05f, YawTo(outP, foeP)); Place(D2, nearP + Vector3.up * .05f, YawTo(nearP, foeP)); yield return null;
                     clearBefore = Skills.SightClear(A.Eye, D.Chest, D);
                     valve.Fire(null); yield return new WaitForSeconds(Config.SteamBloom + .25f);
                     var a = valve.area; rr = a != null ? a.R : 0;
                     float y = 1.6f;
-                    geoIn = SteamArea.BlocksSight(new Vector3(c.x - 15, y, c.z + 8.6f), new Vector3(c.x + 15, y, c.z + 8.6f));
-                    geoOut = !SteamArea.BlocksSight(new Vector3(c.x - 15, y, c.z + 9.5f), new Vector3(c.x + 15, y, c.z + 9.5f));
+                    geoIn = SteamArea.BlocksSight(new Vector3(c.x - R - 6, y, c.z + R - .4f), new Vector3(c.x + R + 6, y, c.z + R - .4f));
+                    geoOut = !SteamArea.BlocksSight(new Vector3(c.x - R - 6, y, c.z + R + .5f), new Vector3(c.x + R + 6, y, c.z + R + .5f));
                     near2 = !SteamArea.BlocksSight(new Vector3(c.x - 1, y, c.z), new Vector3(c.x + 1, y, c.z));
                     far4 = SteamArea.BlocksSight(new Vector3(c.x - 2, y, c.z), new Vector3(c.x + 2, y, c.z));
-                    outIn = SteamArea.BlocksSight(new Vector3(c.x - 12, y, c.z), new Vector3(c.x - 1, y, c.z));
+                    outIn = SteamArea.BlocksSight(new Vector3(c.x - R - 3, y, c.z), new Vector3(c.x - 1, y, c.z));
                     aiOut = sOut && !Skills.SightClear(A.Eye, D.Chest, D) && !Skills.SightClear(A.Eye, D.Head, D);   // Bot.CanSee 就是这两条
                     aiNear = sNear && Skills.SightClear(D2.Eye, D.Chest, D);
                     Place(D2, farP + Vector3.up * .05f, YawTo(farP, foeP)); yield return null;
@@ -89,13 +90,13 @@ namespace NeonSiege
                     blast = Skills.BlastClear(A.Eye, D.Chest, D);
                     float hp0 = D.hp + D.armor; Bullet.Fire(A, A.Eye, A.Eye, (D.Chest - A.Eye).normalized, Color.white);
                     yield return new WaitForSeconds(.4f); bullet = D.hp + D.armor < hp0;
-                    foreach (var z in LinkPlus.MapAreas()) if (Flat(z.c, c) < .5f && Mathf.Abs(z.r - 9f) < .3f && z.total > 9.9f) mapOk = true;
+                    foreach (var z in LinkPlus.MapAreas()) if (Flat(z.c, c) < .5f && Mathf.Abs(z.r - R) < .3f && z.total > Config.SteamAreaLife - .1f) mapOk = true;
                     timing = a != null && Mathf.Abs(a.until - a.born - Config.SteamAreaLife) < .01f && Mathf.Abs(valve.CooldownLeft - (SteamValve.Cooldown - Config.SteamBloom - .65f)) < .3f && Mathf.Approximately(kitchen.areaRadius, Config.SteamAreaKitchen);
                     Reset();
                 }
-                Check("M85", "整片蒸汽：中庭蒸汽阀 " + Config.SteamAreaMid + " m / 后厨 " + Config.SteamAreaKitchen + " m、" + Config.SteamAreaLife + " s、冷却 " + Config.SteamAreaCooldown + " s；判定半径 = 显示半径（8.6 m 处挡、9.5 m 处不挡）；雾里 2 m 看得见、4 m 看不见；外面看不进去；AI 走同一个 SightClear；子弹照样打中、爆炸线不受影响；地图上画出雾区",
+                Check("M85", "整片蒸汽：中庭蒸汽阀 " + Config.SteamAreaMid + " m / 后厨 " + Config.SteamAreaKitchen + " m、" + Config.SteamAreaLife + " s、冷却 " + Config.SteamAreaCooldown + " s；判定半径 = 显示半径（半径内 0.4 m 处挡、外 0.5 m 处不挡）；雾里 2 m 看得见、4 m 看不见；外面看不进去；AI 走同一个 SightClear；子弹照样打中、爆炸线不受影响；地图上画出雾区",
                     clearBefore && rr == Config.SteamAreaMid && geoIn && geoOut && near2 && far4 && outIn && aiOut && aiNear && aiFar && blast && bullet && mapOk && timing,
-                    "喷前看得见=" + clearBefore + "，半径 " + rr + "，8.6 m 挡=" + geoIn + " 9.5 m 通=" + geoOut + "，雾里 2 m 通=" + near2 + " 4 m 挡=" + far4 + "，外看内挡=" + outIn
+                    "喷前看得见=" + clearBefore + "，半径 " + rr + "，R−0.4 m 挡=" + geoIn + " R+0.5 m 通=" + geoOut + "，雾里 2 m 通=" + near2 + " 4 m 挡=" + far4 + "，外看内挡=" + outIn
                     + "；AI：雾外 11 m 看不见=" + aiOut + "，雾里 2 m 看得见=" + aiNear + "，雾里 3.6 m 看不见=" + aiFar + "（取点 " + where + "）；爆炸线通=" + blast + "，子弹打中=" + bullet + "，地图雾区=" + mapOk + "，时长/冷却/后厨半径=" + timing);
             }
 
@@ -328,7 +329,7 @@ namespace NeonSiege
                 }
                 Check("M93", "棉花糖遇蒸汽：范围 = 整片蒸汽（后厨蒸汽阀 " + Config.SteamAreaKitchen + " m 原地变粉、火锅热气 " + Config.SteamAreaPot + " m）；棉花糖蒸汽里、迷雾圈外的敌人也黏脚",
                     kPink && kR && potR && jam,
-                    "后厨阀门变粉=" + kPink + "（半径 = 7 m：" + kR + "），火锅棉花糖蒸汽 9 m=" + potR + "，迷雾外 14 m 的敌人黏脚=" + jam);
+                    "后厨阀门变粉=" + kPink + "（半径 = " + Config.SteamAreaKitchen + " m：" + kR + "），火锅棉花糖蒸汽 " + Config.SteamAreaPot + " m=" + potR + "，迷雾外 14 m 的敌人黏脚=" + jam);
             }
 
             // ---------------- M94：威化坡道（铆钉副联动）
@@ -363,7 +364,7 @@ namespace NeonSiege
                 int butter = -1, choco = -1;
                 for (int i = 0; i < SauceZone.Count; i++) { if (SauceZone.KindOf(i) == SauceZone.Butter && butter < 0) butter = i; if (SauceZone.KindOf(i) == SauceZone.Chocolate && choco < 0) choco = i; }
                 var ember = A2; var foe = D;
-                bool fire = false, noCaramel = false, burn = false, hot = false, caramelKept = false; float dmg = 0; int l0 = Links.Total[7];
+                bool fire = false, noCaramel = false, burn = false, hot = false, caramelKept = false, wasAlive = false, inButter = false, diffTeam = false; float dmg = 0; int l0 = Links.Total[7];
                 if (butter >= 0 && choco >= 0 && ember != null && foe != null)
                 {
                     if (ember.role != Role.Ember) ember.ChangeRole(Role.Ember);
@@ -373,7 +374,10 @@ namespace NeonSiege
                     yield return new WaitForSeconds(Config.BlastWarning + .15f);
                     fire = SauceFire.Burning(butter);
                     noCaramel = true; foreach (var fz in Object.FindObjectsOfType<FireZone>()) if (Flat(fz.transform.position, bc) < 4f) noCaramel = false;
-                    Place(foe, bc + Vector3.up * .05f, 0); foe.hp = 100; foe.armor = 0; yield return new WaitForSeconds(1f);
+                    wasAlive = foe.alive; if (!foe.alive) Park(foe);
+                    Place(foe, bc + Vector3.up * .05f, 0); foe.hp = 100; foe.armor = 0; yield return new WaitForFixedUpdate(); yield return null;
+                    inButter = SauceZone.Inside(butter, foe.transform.position); diffTeam = foe.team != ember.team;
+                    yield return new WaitForSeconds(1f);
                     dmg = 100 - foe.hp; burn = dmg > 5f;
                     Place(foe, new Vector3(-40, .05f, 4), 0); foe.hp = 100;
                     Vector3 cc = SauceZone.Center(choco);
@@ -385,7 +389,7 @@ namespace NeonSiege
                 }
                 Check("M95", "点酱（焚芯副联动）：纸杯蛋糕炸在黄油上 → 整条跑道着火 " + Config.SauceButterFire + " s（代替焦糖火、不叠加），站在上面的敌人掉血；炸在巧克力酱上 → 热巧克力 " + Config.SauceChocoHot + " s（焦糖火照常）",
                     fire && noCaramel && burn && hot && caramelKept && Links.Total[7] == l0 + 2,
-                    "黄油着火=" + fire + "，没有另起焦糖火=" + noCaramel + "，1 s 掉血 " + dmg.ToString("0") + "，巧克力变热=" + hot + "（焦糖火照常=" + caramelKept + "），联动计数 +" + (Links.Total[7] - l0));
+                    "黄油着火=" + fire + "，没有另起焦糖火=" + noCaramel + "，1 s 掉血 " + dmg.ToString("0") + "（敌人原本存活=" + wasAlive + " 站在黄油里=" + inButter + " 不同队=" + diffTeam + "）" + "，巧克力变热=" + hot + "（焦糖火照常=" + caramelKept + "），联动计数 +" + (Links.Total[7] - l0));
             }
 
             // ---------------- M96：糊监控（幻频副联动）

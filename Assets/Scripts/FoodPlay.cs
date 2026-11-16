@@ -278,6 +278,7 @@ namespace NeonSiege
                     if (e == f || !e.alive || e.team == f.team || rammed.Contains(e)) continue;
                     if (Vector3.Distance(e.transform.position, f.transform.position) > 1.6f) continue;
                     rammed.Add(e); StartCoroutine(Unram(e));
+                    if (Time.time < ramUntil) V24.BurgerClamp(e, f);   // V24：被"夹"进汉堡 0.6 s
                     Vector3 away = e.transform.position - f.transform.position; away.y = 0;
                     e.Launch(away.normalized * 9f + Vector3.up * 6f);
                     if (Time.time < ramUntil) DamageCtx.Set(DamageKind.Ult, UltName(f.role)); else DamageCtx.Set(DamageKind.Food, Ingredients.FormName(form) + "冲撞");
@@ -296,6 +297,7 @@ namespace NeonSiege
         {
             switch (r) { case Role.Falcon: return "吃零食回血翻倍"; case Role.Rivet: return "部署的掩体更耐打（+30%）"; case Role.Ironwall: return "受到爆炸伤害减半"; case Role.Raven: return "打中的敌人被芥末标记 3 秒"; case Role.Ember: return "手雷爆炸范围 +20%"; default: return "被打时 15% 概率甩出糖粒挡掉一发"; }
         }
+        public bool UltRamming { get { return Time.time < ramUntil; } }   // V24：汉堡冲撞撞墙留咬痕
         public bool TryUlt()
         {
             if (!UltReady || !f.alive || Match.I.phase != Phase.Live) return false;
@@ -329,6 +331,7 @@ namespace NeonSiege
             }
             UltWarn.OnUlt(f, ground);   // V22 第三期：敌方大招预警（横幅 + 全图专属音 + 状态条 + 蜡烛落点圈），生效时间不变
             UltFx.Cast(f, ground);      // V23 A2：施放瞬间 / 持续 / 结束的美食表现（规则在上面已经生效，这里只加表现）
+            V24.OnUlt(f, ground);       // V24：施放者 0.4 s 镜头特写；其他人屏幕弹美食大字
             return true;
         }
     }
@@ -667,14 +670,7 @@ namespace NeonSiege
                 Sfx.Play("food_can_open", c, 1f, .6f, 1f, 80f); Sfx.Play("food_burp", c, .9f, .7f, 1f, 60f);
                 Fx.Shake(c, .5f, 18f);
                 SkillPop.World(c + Vector3.up * 3.2f, "可乐喷泉！", new Color(1f, .8f, .45f), null, 1.8f);
-                if (Match.I != null)
-                    foreach (var f in Match.I.fighters)
-                    {
-                        if (!f.alive) continue;
-                        Vector3 d = f.transform.position - c; d.y = 0;
-                        if (d.magnitude > 5.5f) continue;
-                        f.Launch(Vector3.up * 15f + d.normalized * 4f);
-                    }
+                V24.FountainLift(c, 5.5f);   // V24：托到 8 m → 悬浮 2 s → 羽毛缓降（原来直接弹 15 m/s）
                 if (Match.I != null) Match.I.Feed("曼妥思 + 汽水 = 可乐喷泉！", new Color(.9f, .7f, .5f));
             }
         }
@@ -686,7 +682,7 @@ namespace NeonSiege
         // V23 打磨：焦糖棕半透明水柱 + 橙色发光芯 + 大量白泡沫 / 气泡 + 顶部泡沫花 + 底部泡沫圈（原来深棕色 Alpha Blended 叠成一柱黑烟）
         public static readonly Color Caramel = new Color(.92f, .55f, .22f, .6f), CaramelLight = new Color(1f, .76f, .42f, .5f);
         public static readonly string[] Layers = { "可乐水柱", "亮芯", "泡沫", "气泡", "泡沫花", "底部泡沫" };
-        float born; ParticleSystem col, core, foam, bubbles, bloom, baseFoam; Light lamp;
+        float born, reliftAt; ParticleSystem col, core, foam, bubbles, bloom, baseFoam; Light lamp;
         public static ColaFountain Spawn(Vector3 at) { var go = new GameObject("可乐喷泉"); go.transform.position = at; var f = go.AddComponent<ColaFountain>(); f.born = Time.time; return f; }
         ParticleSystem Make(string n, Color a, Color b, float size0, float size1, float speed0, float speed1, float rate, float radius, float grav, Material mat)
         {
@@ -716,14 +712,16 @@ namespace NeonSiege
         void Update()
         {
             float age = Time.time - born;
-            if (age > 2.5f && col != null)
+            float life = V24.ColaFountainLife;   // V24：2.5 s → 4.5 s，期间走进水柱会被再次托起
+            if (age < life && Time.time >= reliftAt) { reliftAt = Time.time + .2f; V24.FountainTick(transform.position); }
+            if (age > life && col != null)
             {
                 foreach (var ps in new[] { col, core, foam, bubbles, bloom, baseFoam }) if (ps != null) { var e = ps.emission; e.enabled = false; }
-                if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit g, 3f, ~0, QueryTriggerInteraction.Ignore)) { var q = FoodFx.Splat(g.point, g.normal, new Color(.78f, .5f, .24f), 3f); if (q != null) Destroy(q, 8f); }
+                if (Physics.Raycast(transform.position + Vector3.up, Vector3.down, out RaycastHit g, 3f, ~0, QueryTriggerInteraction.Ignore)) { var q = FoodFx.Splat(g.point, g.normal, new Color(.78f, .5f, .24f), 3f); if (q != null) Destroy(q, V24.ColaPuddleLife); V24.ColaPuddle(g.point); }   // V24：留一滩打滑的可乐
                 col = null;
             }
-            if (lamp != null) lamp.intensity = age < 2.5f ? 3.5f + Mathf.PerlinNoise(Time.time * 6f, 0) : Mathf.MoveTowards(lamp.intensity, 0, Time.deltaTime * 4f);
-            if (age > 4.5f) Destroy(gameObject);
+            if (lamp != null) lamp.intensity = age < life ? 3.5f + Mathf.PerlinNoise(Time.time * 6f, 0) : Mathf.MoveTowards(lamp.intensity, 0, Time.deltaTime * 4f);
+            if (age > life + 2f) Destroy(gameObject);
         }
     }
 
@@ -739,6 +737,7 @@ namespace NeonSiege
         public static void OnImpact(Fighter attacker, RaycastHit h, WeaponSpec w)
         {
             if (!ToonAssets.Available || attacker == null) return;
+            V24.OnBulletImpact(attacker, h, w);   // V24：可乐瓶 4 枪喷泉 / 火锅连打 7 枪溢锅
             var fs = attacker.Food;
             if (IsHotpot(h.collider))
             {
@@ -889,6 +888,7 @@ namespace NeonSiege
             Vector2 r = queued ? nextR : Random.insideUnitCircle * 4.5f; Vector3 p = Skills.GroundAt(center + new Vector3(r.x, 0, r.y));
             if (Skills.Food && dropped < 6) Queue(); else if (falling != null) { Destroy(falling.gameObject); falling = null; }
             Fx.Explosion(p, 2.5f);
+            if (Skills.Food) V24.FireAt(p, owner);   // V24：蜡烛落进芥末雾 = 辣油爆燃
             for (int i = 0; i < 3; i++) Fx.Burst(p + Vector3.up * .3f, Vector3.up, FoodFx.Confetti[(dropped + i) % 6], 18, 6f, .08f, .8f, .8f);
             FoodFx.Splat(p + Vector3.up * .02f, Vector3.up, new Color(1f, .97f, .92f), 1.4f);
             Sfx.Play("boom", p, .5f, 1.3f, 1f, 70f); Sfx.Play("food_confetti", p, .6f, 1.1f, 1f, 50f);

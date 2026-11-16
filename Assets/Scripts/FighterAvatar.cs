@@ -525,6 +525,11 @@ namespace NeonSiege
             FoodFx.KillPop(owner.transform.position + Vector3.up * .6f);
             var pf = Resources.Load<GameObject>("Toon/Kitchen/Plate");
             if (pf != null) { plate = Instantiate(pf); foreach (var c in plate.GetComponentsInChildren<Collider>()) Destroy(c); plate.transform.position = Skills.GroundAt(owner.transform.position) + Vector3.up * .02f; plate.transform.localScale = Vector3.one * 1.4f; }
+            else plate = new GameObject("盘子");
+            plate.transform.position = Skills.GroundAt(owner.transform.position) + Vector3.up * .02f;
+            var dishHost = new GameObject("一盘菜"); dishHost.transform.SetParent(plate.transform, false); dishHost.transform.localScale = Vector3.one / Mathf.Max(.01f, plate.transform.localScale.x);
+            dishHost.AddComponent<EatenDish>().Init(owner.role);   // V24：变成一盘对应帽子的菜，3 s 后被"吃掉"
+            Destroy(plate, 4.6f);
         }
 
         public void Revive()
@@ -538,9 +543,17 @@ namespace NeonSiege
             gameObject.SetActive(true);
         }
 
+        // V24：大招特写时临时显示自己的身体（第一人称平时是 ShadowsOnly）
+        float showUntil = -1; readonly List<Renderer> shownSelf = new List<Renderer>();
+        public void ShowFor(float secs)
+        {
+            if (shownSelf.Count == 0 && body != null) foreach (var r in body.GetComponentsInChildren<Renderer>()) if (r.shadowCastingMode == UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly) { r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.On; shownSelf.Add(r); }
+            showUntil = Time.time + secs;
+        }
         void Update()
         {
             if (owner == null) return;
+            if (showUntil > 0 && Time.time >= showUntil) { showUntil = -1; foreach (var r in shownSelf) if (r != null) r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.ShadowsOnly; shownSelf.Clear(); }
             if (flashLight != null && Time.time > flashUntil) flashLight.intensity = 0;
             if (flashUntil2 > 0 && Time.time > flashUntil2 && bodyRenderers != null)
             {

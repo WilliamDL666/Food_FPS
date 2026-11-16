@@ -536,7 +536,7 @@ namespace NeonSiege
                 }
                 if (cooldown.TryGetValue(f, out float t) && Time.time < t) continue;
                 // AI only uses a pad when it is heading for that sniper nest (otherwise it gets stranded on rooftops)
-                if (!f.human && !TestAllowBots && (!f.TryGetComponent(out Bot bot) || !bot.WantsPad || cola)) continue;
+                if (!f.human && !TestAllowBots && (!f.TryGetComponent(out Bot bot) || (cola ? !bot.WantsCola : !bot.WantsPad))) continue;   // V24：AI 猎隼会故意冲刺踩可乐弹射（落点已保证在 NavMesh 上）
                 if (Match.I.autoplay) Debug.Log("NEON_PAD r" + Match.I.round + " " + name + " " + f.Hero.name + (cola ? " cola" : ""));
                 cooldown[f] = Time.time + 1f;
                 Vector3 v = WorldLaunch;

@@ -21,6 +21,17 @@ namespace NeonSiege
         public float R, born, until, total, closeAt = -1, baseY, candyUntil = -1; public Vector3 center;
         readonly List<Transform> puffs = new List<Transform>(); readonly List<Vector3> puffBase = new List<Vector3>(); readonly List<Renderer> rends = new List<Renderer>();
         ParticleSystem ps; bool tintedCandy;
+        public bool popcorn;   // V24：爆米花机炸出的噼啪烟（走 Dust 规则：挡视线、不算盲区上限）
+        float drifted; LineRenderer edge;   // V24：风向漂移距离 / 地上一圈淡淡的水汽线
+        // V24：雾团改成自发光奶白材质（原来用模型自带的受光材质，背光面是一团团深灰色阴影球，见 V23 截图 92_hotpot_steam）
+        static Material puffMatBase;
+        static Material PuffMat(Color c)
+        {
+            if (puffMatBase == null) { var neon = Resources.Load<Material>("Materials/Neon"); puffMatBase = neon != null ? new Material(neon) : new Material(Shader.Find("Standard")); puffMatBase.EnableKeyword("_EMISSION"); puffMatBase.SetFloat("_Glossiness", 0f); puffMatBase.globalIlluminationFlags = MaterialGlobalIlluminationFlags.None; }
+            var m = new Material(puffMatBase); Paint(m, c); return m;
+        }
+        static void Paint(Material m, Color c) { if (m == null) return; m.color = c; m.SetColor("_EmissionColor", c * .62f); }
+        public void Recolor(Color c) { foreach (var r in rends) if (r != null) Paint(r.material, c); if (ps != null) { var main = ps.main; main.startColor = new Color(c.r, c.g, c.b, .8f); } }
         void OnEnable() { Live.Add(this); }
         void OnDisable() { Live.Remove(this); }
 
@@ -118,7 +129,7 @@ namespace NeonSiege
         {
             tintedCandy = candy;
             Color pink = new Color(1f, .7f, .9f), white = new Color(1f, .96f, .98f), steam = new Color(.97f, .98f, 1f);
-            for (int i = 0; i < rends.Count; i++) if (rends[i] != null) rends[i].material.color = candy ? Color.Lerp(pink, white, (i * .37f) % 1f) : steam;
+            for (int i = 0; i < rends.Count; i++) if (rends[i] != null) Paint(rends[i].material, candy ? Color.Lerp(pink, white, (i * .37f) % 1f) : steam);
             if (ps != null) { var main = ps.main; main.startColor = candy ? new Color(1f, .78f, .94f, .85f) : new Color(1f, 1f, 1f, .8f); }
         }
         void Build(Color col)
@@ -141,7 +152,7 @@ namespace NeonSiege
                     float rr = R * (layer == 0 ? .8f : .55f) * Mathf.Sqrt((i + .5f) / m), ang = i * 2.39996f + layer;
                     Vector3 off = new Vector3(Mathf.Cos(ang) * rr, (layer == 0 ? .5f : 2.3f) + (float)rnd.NextDouble() * (dust ? .8f : 1.3f), Mathf.Sin(ang) * rr);
                     holder.localPosition = off; holder.localRotation = Quaternion.Euler(0, (float)rnd.NextDouble() * 360f, 0);
-                    foreach (var r in puff.GetComponentsInChildren<Renderer>()) { r.material.color = col; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; rends.Add(r); }
+                    foreach (var r in puff.GetComponentsInChildren<Renderer>()) { r.sharedMaterial = PuffMat(col); r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false; rends.Add(r); }
                     puffs.Add(holder); puffBase.Add(off);
                 }
             }
@@ -163,6 +174,18 @@ namespace NeonSiege
             {
                 End();
                 if (Match.I != null) Match.I.Feed(Candy ? "冰淇淋吹散了热气 · 棉花糖蒸汽一起散了" : "冰淇淋吹散了整片白雾", new Color(.7f, .95f, 1f));
+            }
+            // V24：风向 —— 整片雾往下风处慢慢飘（1 m/s，最多 8 m）；地上一圈水汽线跟着当前判定半径
+            if (Blind && closeAt < 0 && drifted < V24.WindMaxDrift && V24.Wind.sqrMagnitude > .01f)
+            {
+                Vector3 step = V24.Wind * Time.deltaTime; drifted += step.magnitude;
+                center += step; transform.position += step;
+            }
+            if (Blind)
+            {
+                if (edge == null) { edge = new GameObject("水汽线").AddComponent<LineRenderer>(); edge.transform.SetParent(transform, true); edge.material = Fx.Additive; edge.startWidth = edge.endWidth = .14f; edge.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; }
+                Color ec = Candy ? new Color(1f, .7f, .9f, .55f) : new Color(.9f, .95f, 1f, .45f); edge.startColor = edge.endColor = ec;
+                Skills.Circle(edge, new Vector3(center.x, baseY + .06f, center.z), Mathf.Max(.3f, Radius));
             }
             float bloom = kind == SteamKind.Dust ? .15f : Config.SteamBloom;
             float k = Mathf.SmoothStep(.25f, 1f, Mathf.Clamp01(age / bloom));
@@ -296,8 +319,25 @@ namespace NeonSiege
     // ---------------------------------------------------------------- 果冻粘身：穿过门帘的敌人身上粘果冻（透视 2.5 s + "噗叽"声）
     public class JellyStuck : MonoBehaviour
     {
-        public float until; float fxAt; Fighter f;
-        void Start() { f = GetComponent<Fighter>(); }
+        public float until; float fxAt; Fighter f; GameObject shell; Material shellMat;
+        void Start() { f = GetComponent<Fighter>(); EnsureShell(); }
+        // V24：身上挂一层半透明粉色果冻壳（移速 ×0.85 在 V24.SpeedMul；走路一路"啵叽"）
+        public void EnsureShell()
+        {
+            if (shell != null || !Skills.Food) return;
+            shell = GameObject.CreatePrimitive(PrimitiveType.Sphere); Destroy(shell.GetComponent<Collider>()); shell.name = "果冻壳";
+            shellMat = new Material(Shader.Find("Sprites/Default")) { color = new Color(1f, .45f, .75f, .28f), renderQueue = 3050 };
+            var r = shell.GetComponent<Renderer>(); r.sharedMaterial = shellMat; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; r.receiveShadows = false;
+            var fi = GetComponent<Fighter>(); if (fi != null && fi.human) r.enabled = false;   // 自己的第一人称不挡视线
+        }
+        void OnDestroy() { if (shell != null) Destroy(shell); if (shellMat != null) Destroy(shellMat); }
+        void LateUpdate()
+        {
+            if (shell == null || f == null) return;
+            float w = Mathf.Sin(Time.time * 14f) * .05f;
+            shell.transform.position = f.transform.position + Vector3.up * .95f;
+            shell.transform.localScale = new Vector3(1.05f + w, 2f - w * 2f, 1.05f + w);
+        }
         void Update()
         {
             if (f == null || !f.alive || Time.time > until) { Destroy(this); return; }
@@ -305,7 +345,7 @@ namespace NeonSiege
             {
                 fxAt = Time.time + .4f;
                 Fx.Burst(f.Chest, Vector3.down, Skills.Caramel, 4, 1f, .07f, .5f, 1.2f);
-                if (Skills.Food && f.velocity.sqrMagnitude > 1f) Sfx.Play("food_squish", f.transform.position, .45f, 1.5f, 1f, 18f);
+                if (Skills.Food && f.velocity.sqrMagnitude > 1f) { Sfx.Play("food_jelly_boing", f.transform.position, .5f, 1.6f + Random.value * .2f, 1f, 22f); Sfx.Play("food_squish", f.transform.position, .45f, 1.5f, 1f, 18f); }   // V24：啵叽
             }
         }
     }
@@ -335,6 +375,7 @@ namespace NeonSiege
             l = new GameObject("火光").AddComponent<Light>(); l.transform.SetParent(transform, false); l.transform.localPosition = Vector3.up * 1.2f; l.color = new Color(1f, .55f, .2f); l.range = Mathf.Max(rx, rz) * 2.5f; l.intensity = 3f;
             Sfx.Play(Skills.Food ? "food_caramel_bubble" : "thrusterFire", transform.position, 1f, .8f, 1f, 35f);
             Skills.spawned.Add(gameObject);
+            if (Skills.Food) V24.FireAt(c, by);   // V24：黄油火碰到芥末雾 = 辣油爆燃
         }
         void Update()
         {
@@ -356,12 +397,13 @@ namespace NeonSiege
     // ---------------------------------------------------------------- 芥末呛雾的扩散（1.75 s 从锅口扩到最大半径）
     public class MustardGrow : MonoBehaviour
     {
-        public float R, born; public ParticleSystem ps; public LineRenderer ring; public Vector3 ground;
+        public float R, born; public ParticleSystem ps; public LineRenderer ring; public Vector3 ground; public Transform disc;
         void Update()
         {
             float k = Mathf.Clamp01((Time.time - born) / Config.MustardSpread), r = Mathf.Max(.6f, R * k);
             if (ps != null) { var sh = ps.shape; sh.radius = r * .85f; var em = ps.emission; em.rateOverTime = 30 + r * r * 1.1f; }
             if (ring != null) Skills.Circle(ring, ground, r);
+            if (disc != null) disc.localScale = new Vector3(r * 2f, .004f, r * 2f);
             if (k >= 1f && ring != null) enabled = false;
         }
     }
@@ -385,7 +427,7 @@ namespace NeonSiege
             {
                 if (!saved) { saved = true; fog = RenderSettings.fog; mode = RenderSettings.fogMode; col = RenderSettings.fogColor; dens = RenderSettings.fogDensity; fs = RenderSettings.fogStartDistance; fe = RenderSettings.fogEndDistance; }
                 RenderSettings.fog = true; RenderSettings.fogMode = FogMode.Linear;
-                RenderSettings.fogStartDistance = .3f; RenderSettings.fogEndDistance = Config.SteamInsideSight + 1.5f;
+                RenderSettings.fogStartDistance = .3f; RenderSettings.fogEndDistance = Config.SteamInsideSight + .6f;   // V24：远处完全看不见；2.5 m 内的人由 V24Ticker 画深色剪影
                 RenderSettings.fogColor = inside.kind == SteamKind.Dust ? new Color(.92f, .84f, .72f) : inside.Candy ? new Color(1f, .82f, .93f) : new Color(.93f, .95f, .97f);
                 var m = Match.I; if (m != null && m.player != null && inside.Blind) FoodTips.Trigger("steam_inside");
             }

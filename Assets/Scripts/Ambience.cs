@@ -7,6 +7,7 @@ namespace NeonSiege
     public class Ambience : MonoBehaviour
     {
         AudioSource wind, music; bool food;
+        public static AudioSource Music;   // V24：局势音乐（V24Audio 调速度 / 叠紧张节奏）
         float nextGunfire, nextSiren;
         AudioClip siren;
         static readonly string[] guns = { "gun_ar", "gun_lmg", "gun_smg", "gun_br", "gun_dmr" };
@@ -17,7 +18,8 @@ namespace NeonSiege
             {
                 // V18：美食街背景音乐（程序合成），不再有远处枪声和警报
                 var clip = Resources.Load<AudioClip>("Music/food_street");
-                if (clip != null) { music = gameObject.AddComponent<AudioSource>(); music.clip = clip; music.loop = true; music.spatialBlend = 0; music.volume = .2f; music.Play(); }
+                if (clip != null) { music = gameObject.AddComponent<AudioSource>(); music.clip = clip; music.loop = true; music.spatialBlend = 0; music.volume = .2f; music.Play(); Music = music; }
+                V24Audio.Ensure(gameObject);
                 food = true;
             }
             wind = gameObject.AddComponent<AudioSource>();

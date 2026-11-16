@@ -221,7 +221,7 @@ namespace NeonSiege
             // 地面黄绿辣雾（LINK-4）
             var ps = new GameObject("辣雾").AddComponent<ParticleSystem>(); ps.transform.SetParent(go.transform, false); ps.transform.localPosition = Vector3.up * .4f;
             var main = ps.main; main.startLifetime = new ParticleSystem.MinMaxCurve(1.8f, 3f); main.startSpeed = new ParticleSystem.MinMaxCurve(.2f, .7f); main.startSize = new ParticleSystem.MinMaxCurve(1.4f, 2.8f);
-            main.startColor = new Color(.75f, 1f, .25f, .45f); main.maxParticles = 700; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;
+            main.startColor = new Color(.78f, 1f, .2f, .62f);   // V24：浓黄绿（原 .45 透明度远处看不出） main.maxParticles = 700; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;
             main.startSize = new ParticleSystem.MinMaxCurve(1.8f, 3.4f);   // V23 d：齐腰高的浓黄绿雾
             var em = ps.emission; em.rateOverTime = 70;
             var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Circle; sh.radius = R * .85f; sh.rotation = new Vector3(-90, 0, 0);
@@ -230,14 +230,18 @@ namespace NeonSiege
             ps.GetComponent<ParticleSystemRenderer>().material = Fx.Smoke;
             // 锅里冒起来的芥末烟柱
             var plume = new GameObject("芥末烟柱").AddComponent<ParticleSystem>(); plume.transform.SetParent(go.transform, false); plume.transform.localPosition = Vector3.up * 1.1f; plume.transform.localRotation = Quaternion.Euler(-90, 0, 0);
-            var pm = plume.main; pm.startLifetime = 2.2f; pm.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.4f); pm.startSize = new ParticleSystem.MinMaxCurve(.8f, 1.6f); pm.startColor = new Color(.7f, 1f, .2f, .6f); pm.maxParticles = 120; pm.simulationSpace = ParticleSystemSimulationSpace.World;
+            var pm = plume.main; pm.startLifetime = 2.2f; pm.startSpeed = new ParticleSystem.MinMaxCurve(1.2f, 2.4f); pm.startSize = new ParticleSystem.MinMaxCurve(.8f, 1.6f); pm.startColor = new Color(.72f, 1f, .18f, .8f); pm.maxParticles = 120; pm.simulationSpace = ParticleSystemSimulationSpace.World;
             var pe = plume.emission; pe.rateOverTime = 30; var psh = plume.shape; psh.shapeType = ParticleSystemShapeType.Cone; psh.angle = 12; psh.radius = .6f;
             plume.GetComponent<ParticleSystemRenderer>().material = Fx.Smoke;
             var ring = new GameObject("辣雾范围").AddComponent<LineRenderer>(); ring.transform.SetParent(go.transform, false);
-            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .12f; ring.startColor = ring.endColor = Skills.Mustard; ring.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .35f; ring.startColor = ring.endColor = new Color(.85f, 1f, .2f, 1f);   // V24：边界圈加粗加亮（远处一眼看见） ring.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             Skills.Circle(ring, Skills.GroundAt(at + Vector3.up), R);
             var l = new GameObject("辣雾光").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up * 1.5f; l.color = Skills.Mustard; l.range = R * 1.6f; l.intensity = 2.2f;
-            var gr = go.AddComponent<MustardGrow>(); gr.R = R; gr.born = Time.time; gr.ps = ps; gr.ring = ring; gr.ground = Skills.GroundAt(at + Vector3.up);   // 1.75 s 从锅口扩散到最大
+            // V24：地面铺一层半透明黄绿圆盘，和边界圈一起扩散（只是表现，判定半径不变）
+            var disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Object.Destroy(disc.GetComponent<Collider>()); disc.name = "辣雾地面"; disc.transform.SetParent(go.transform, true);
+            disc.transform.position = Skills.GroundAt(at + Vector3.up) + Vector3.up * .04f; disc.transform.localScale = new Vector3(1.2f, .004f, 1.2f);
+            var dr = disc.GetComponent<Renderer>(); dr.sharedMaterial = new Material(Shader.Find("Sprites/Default")) { color = new Color(.75f, 1f, .15f, .22f) }; dr.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; dr.receiveShadows = false;
+            var gr = go.AddComponent<MustardGrow>(); gr.R = R; gr.born = Time.time; gr.ps = ps; gr.ring = ring; gr.disc = disc.transform; gr.ground = Skills.GroundAt(at + Vector3.up);   // 1.75 s 从锅口扩散到最大
             Skills.spawned.Add(go);
             return go;
         }

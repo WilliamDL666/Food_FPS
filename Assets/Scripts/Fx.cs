@@ -11,6 +11,8 @@ namespace NeonSiege
         static Transform root;
         public static float LastPlayedAt;
         public static string LastPlayed = "";
+        public static readonly System.Collections.Generic.Dictionary<string, float> PlayedAt = new System.Collections.Generic.Dictionary<string, float>();   // V24：每组音效最后一次播放时间（测试判定用）
+        public static bool PlayedSince(string group, float t) { return PlayedAt.TryGetValue(group, out float at) && at >= t; }
 
         static void Load()
         {
@@ -27,7 +29,7 @@ namespace NeonSiege
         public static void Play(string group, Vector3 pos, float volume = 1f, float pitch = 1f, float spatial = 1f, float maxDistance = 45f)
         {
             Load();
-            LastPlayed = group; LastPlayedAt = Time.time;
+            LastPlayed = group; LastPlayedAt = Time.time; PlayedAt[group] = Time.time;
             if (!groups.TryGetValue(group, out var list) || list.Count == 0) return;
             if (root == null) root = new GameObject("Sfx Pool").transform;
             AudioSource src = null;

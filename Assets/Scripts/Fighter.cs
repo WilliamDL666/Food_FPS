@@ -446,8 +446,10 @@ namespace NeonSiege
             if (sauce == SauceZone.Chocolate) speed *= .7f;   // V17：巧克力酱黏脚
             else if (sauce == SauceZone.Butter) speed *= 1.1f;
             if (Match.I.BombCarrier == this) speed *= .96f;
+            speed *= V24.SpeedMul(this);   // V24：果冻挂身 ×0.85 / 队友气泡带 ×1.1
             Vector3 target = Vector3.ClampMagnitude(wish, 1f) * speed;
             float accel = grounded ? (sauce == SauceZone.Butter ? (SauceZone.SlickAt(transform.position) ? 2f : 4.5f) : Tune.Accel) : Tune.AirAccel;   // 黄油地面打滑
+            accel *= V24.AccelMul(this);   // V24：可乐水洼 / 冰面 / 红油 / 奶油滑地
             Vector3 planar = new Vector3(velocity.x, 0, velocity.z);
             // 弹射板飞行中保持惯性（不按方向键就不减速），保证能落到高台上
             if (launched && !grounded) { if (wish.sqrMagnitude > .01f) planar = Vector3.MoveTowards(planar, planar + target * .25f, 2f * Time.deltaTime); }
@@ -468,7 +470,7 @@ namespace NeonSiege
                 verticalSpeed = Tune.JumpSpeed; jumpBufferedAt = -9; lastGroundedAt = -9;
                 stamina = Mathf.Max(0, stamina - Tune.JumpCost); staminaUsedAt = Time.time;
             }
-            verticalSpeed -= Tune.Gravity * Time.deltaTime;
+            verticalSpeed = V24.Vertical(this, verticalSpeed);   // V24：= 原来的 "-= Gravity * dt"；被可乐托起时改成托举 / 悬浮 / 羽毛缓降
             velocity = planar + Vector3.up * verticalSpeed;
             var flags = cc.Move(velocity * Time.deltaTime);
             if ((flags & CollisionFlags.Above) != 0 && verticalSpeed > 0) verticalSpeed = 0;
@@ -486,6 +488,9 @@ namespace NeonSiege
 
         public void ApplyDash(Vector3 delta) { cc.Move(delta); }
         float verticalSpeedBeforeLand;
+        Vector3 ultCamOff;
+        // V24：大招特写期间让自己的身体可见（第一人称平时只投影子）
+        public void ShowSelf(float secs) { if (avatar != null) avatar.ShowFor(secs); }
 
         // Surface-aware footsteps: metal floors / plates ring, everything else is concrete.
         void Footstep(float vol, float pitchMul)
@@ -497,6 +502,7 @@ namespace NeonSiege
                 string m = r != null && r.sharedMaterial != null ? r.sharedMaterial.name : "";
                 if (m.Contains("Metal") || m.Contains("Plate") || m.Contains("Sheet") || m.Contains("Corrugated") || m.Contains("Rusty")) { group = "impactMetal_light"; pitchK = 1.35f; vol *= .55f; }
             }
+            if (PopcornCrackle.Masks(transform.position)) vol *= .25f;   // V24：爆米花噼啪声盖住脚步
             Sfx.Play(group, transform.position, vol, pitchMul * pitchK, human ? 0f : 1f, 28f);
         }
 
@@ -681,6 +687,7 @@ namespace NeonSiege
             if (prone) s *= Tune.ProneSpreadMul;
             if (Time.time < aimRecoveryUntil) s += 3f;
             if (Time.time < jammedUntil) s *= Config.NoiseSpread;
+            s += V24.SpreadAdd(this);   // V24：可乐悬浮中能开枪，但散布 +2°
             return s + bloom;
         }
 
@@ -792,6 +799,7 @@ namespace NeonSiege
                 if (ToonAssets.Available)
                 {
                     var th = FoodFx.For(w);
+                    V24.HitFood(h.point, -dir, w, head, f);   // V24：命中溅对应的食物（珍珠 / 爆米花 / 番茄酱…），爆头"啵"+ 冒星星
                     Fx.Burst(h.point, -dir, th.splat, head ? 20 : 12, 3.5f, .07f, .45f, 1.1f);
                     if (armorHit) Fx.Burst(h.point, -dir, new Color(.5f, .85f, 1f), 5, 2.5f, .04f, .25f, .6f);
                     if (!human) Sfx.Play("food_squish", h.point, .45f, Random.Range(.9f, 1.1f), 1f, 25f);
@@ -948,14 +956,15 @@ namespace NeonSiege
             landDip = Mathf.MoveTowards(landDip, 0, Time.deltaTime * .5f);
             float eye = (prone ? .45f : crouching ? 1.08f : 1.62f) - (Sliding ? .12f : 0f) - landDip;
             Vector3 camTarget = new Vector3(lean * .38f, eye - Mathf.Abs(lean) * .06f, 0);
-            Vector3 camLp = Vector3.Lerp(cam.transform.localPosition, camTarget, Time.deltaTime * (mantling ? 20f : 14f));
+            Vector3 camLp = Vector3.Lerp(cam.transform.localPosition - ultCamOff, camTarget, Time.deltaTime * (mantling ? 20f : 14f));   // V24：先去掉上一帧的大招特写偏移
             // V22：趴下 / 起身的镜头高度按 ProneTransition（0.45 s，前快后慢）走完，和"切换期间不能开火"同步
             if (Time.time < proneChangeUntil && Tune.ProneTransition > .01f)
             {
                 float pk = Mathf.Clamp01((Time.time - proneChangeAt) / Tune.ProneTransition);
                 camLp.y = Mathf.Lerp(proneCamFrom, camTarget.y, 1f - (1f - pk) * (1f - pk));
             }
-            cam.transform.localPosition = camLp;
+            ultCamOff = V24.UltCamOffset(this);   // V24：放大招 0.4 s 镜头拉出再拉回
+            cam.transform.localPosition = camLp + ultCamOff;
             if (Time.time - lastShotAt > .14f && recoilDebt > 0)
             {
                 float step = Mathf.Min(recoilDebt, Time.deltaTime * Mathf.Max(3f, recoilDebt * 7f));
@@ -964,7 +973,7 @@ namespace NeonSiege
             Vector3 localVel = transform.InverseTransformDirection(velocity);
             float rollTarget = -Mathf.Clamp(localVel.x, -6, 6) * .35f + (Sliding ? 5f : 0f);
             camRoll = Mathf.Lerp(camRoll, rollTarget, Time.deltaTime * 8f);
-            camHeight = cam.transform.localPosition.y;
+            camHeight = cam.transform.localPosition.y - ultCamOff.y;
             punchPitch = Mathf.Lerp(punchPitch, 0, Time.deltaTime * 9f); punchYaw = Mathf.Lerp(punchYaw, 0, Time.deltaTime * 9f);
             Fx.shake = Mathf.MoveTowards(Fx.shake, 0, Time.deltaTime * 1.6f);
             Vector3 shakeOff = Fx.shake > 0 ? new Vector3(Mathf.PerlinNoise(Time.time * 25, 0) - .5f, Mathf.PerlinNoise(0, Time.time * 25) - .5f, 0) * Fx.shake * 6f * Tune.ShakeScale : Vector3.zero;

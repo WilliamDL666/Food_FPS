@@ -11,7 +11,8 @@ namespace NeonSiege
     public class FeedItem
     {
         public string text; public float time; public Color color; public bool kill; public Fighter killer, victim; public bool head;
-        public WeaponSpec gun; public string cause = ""; public DamageKind kind;   // V22：播报画实际用的枪 / 技能（不是击杀者的招牌枪）
+        public WeaponSpec gun; public string cause = ""; public DamageKind kind;
+        public string foodLine;   // V24：美食动词播报（"猎隼 用珍珠奶茶 吸干了 铁幕"，爆头 = 一口闷）   // V22：播报画实际用的枪 / 技能（不是击杀者的招牌枪）
     }
 
     public class RoundRecord
@@ -104,6 +105,7 @@ namespace NeonSiege
             ArenaLightmaps.Apply(arena);   // 编辑器里烘焙好的全局光照
             FoodScenery.Dress(arena);      // V21：场景道具（建在 Arena 层级外、烘焙匹配之后，不影响光照贴图按顺序匹配）
             LinkPlus.Dress(arena);         // V23 d：开大火旋钮 / 威化坡道点 / 酱料点（同样建在 Arena 层级外）
+            V24.Dress(arena);              // V24：冰淇淋冰柜 / 爆米花机 / 巨型甜甜圈（同样建在 Arena 层级外）
             GameSettings.Apply();
             Time.timeScale = 1;
             gameObject.AddComponent<Ambience>();
@@ -277,6 +279,7 @@ namespace NeonSiege
             Skills.ClearRound();
             arena.ResetRound();
             Pings.Clear(); UltWarn.Clear();   // V22 第三期
+            V24.NewRound();                   // V24：每回合随机风向、清掉联动计数
             if (FFA)
             {
                 foreach (var f in fighters) { f.alive = false; RespawnFFA(f); }
@@ -318,9 +321,12 @@ namespace NeonSiege
                 bool att = f.team == AttackingTeam;
                 f.Respawn(arena.SpawnPoint(att, f.slot), att ? 90 : -90);
             }
-            if (!testMode) foreach (var f in fighters) if (!f.human) BotBuy(f);
             ResetBomb();
             phase = Phase.Prep; phaseTimer = autoplay ? 2f : Config.PrepTime; roundClock = Config.RoundTime;
+            // V24 修复：买枪要求处于准备阶段（Fighter.Buy），以前在设阶段之前调用 → 电脑永远拿手枪
+            if (!testMode) foreach (var f in fighters) if (!f.human) BotBuy(f);
+            BalanceBotSkill();
+            if (autoplay) { var sb = new System.Text.StringBuilder(); foreach (var f in fighters) if (!f.human) sb.Append(' ').Append(f.Hero.name).Append('=').Append(f.W.id).Append(f.W == Config.Pistol ? "(手枪)" : "").Append('$').Append(f.credits); Debug.Log("NEON_BUY r" + round + sb); }   // V24：电脑买枪遥测（第 2 回合起主武器比例）
             arena.SetSpawnBarriers(true);
             defendersWipedAnnounced = false;
             current = new RoundRecord { round = round, attackers = AttackingTeam };
@@ -330,7 +336,7 @@ namespace NeonSiege
         }
 
         // Bots: signature gun if affordable, otherwise the best they can pay for (keep a gun they survived with)
-        void BotBuy(Fighter f)
+        public void BotBuy(Fighter f)
         {
             if (f.W != Config.Pistol) return;
             if (f.Buy(f.Hero.weapon)) return;
@@ -341,6 +347,27 @@ namespace NeonSiege
                 if (pr <= f.credits && pr > bestPrice && UnityEngine.Random.value < .8f) { best = w; bestPrice = pr; }
             }
             if (best != null) f.Buy(best);
+        }
+
+        // V24 修复：两队电脑强度配对抽取。每个位置抽一个准度，两队同位置的电脑拿同一个值（再左右各 ±0.02 抖动），
+        // 同位置两边完全一样，两队电脑平均准度相等；以前每个电脑在 Bot.Start 里各自随机，两队平均能差 0.1+，比分一边倒。
+        public static readonly float[] PairedAccuracy = { .55f, .55f, .55f };
+        public void BalanceBotSkill()
+        {
+            if (round == 1)
+                for (int s = 0; s < PairedAccuracy.Length; s++) PairedAccuracy[s] = UnityEngine.Random.Range(.45f, .65f);
+            foreach (var f in fighters)
+            {
+                if (f.human || !f.TryGetComponent(out Bot b)) continue;
+                b.accuracy = PairedAccuracy[Mathf.Clamp(f.slot, 0, 2)];
+            }
+        }
+        public static float TeamAccuracy(int team)
+        {
+            float s = 0; int n = 0;
+            if (I == null) return 0;
+            foreach (var f in I.fighters) if (f.team == team && !f.human && f.TryGetComponent(out Bot b)) { s += b.accuracy; n++; }
+            return n > 0 ? s / n : 0;
         }
 
         void ResetBomb()
@@ -593,6 +620,7 @@ namespace NeonSiege
             var item = new FeedItem { text = k + " ▶ " + victim.Hero.name, time = Time.unscaledTime, color = killer != null ? Config.TeamColor(killer.team) : Color.white, kill = true, killer = killer, victim = victim, head = head };
             if (CombatHud.LastHit(victim, out HitRecord kb)) { item.gun = kb.gun; item.cause = kb.weapon ?? ""; item.kind = kb.kind; if (killer == null && kb.kind != DamageKind.Gun) k = kb.weapon; }   // 致命一击的真实来源
             item.text = k + " ▶ " + victim.Hero.name;
+            if (ToonAssets.Available) item.foodLine = V24.KillLine(item);
             feed.Add(item);
             if (feed.Count > 7) feed.RemoveAt(0);
             if (Mode == GameMode.Range) { Range.OnKilled(victim); return; }
@@ -696,6 +724,7 @@ namespace NeonSiege
             Feed("回合结束：" + lastRoundResult + "（" + reason + "）", winner < 0 ? Color.white : Config.TeamColor(winner));
             if (Config.SwapEveryRound) Feed("下回合攻守互换", new Color(1f, .85f, .3f));
             Sfx.Ui(player != null && winner == player.team ? "confirmation" : "error", .6f, .8f);
+            V24.Celebrate(winner);   // V24：胜利方举起餐具干杯 + 撒彩糖，MVP 戴主厨帽
             if (ui != null) ui.OnRoundEnd();
         }
 

@@ -20,7 +20,12 @@ namespace NeonSiege
         Shutter gateTry; float gateTryStart, gateTouchAt; bool gateGaveUp, wantCloseGate; float valveThinkAt, valveUntil; SteamValve valveTarget;
         // V23 d：进雾关阀（敌方开的整片蒸汽）/ 守关口开大火 / 幻频糊监控
         SteamValve closeTarget; float closeUntil, closeThinkAt; readonly HashSet<SteamArea> closeTried = new HashSet<SteamArea>(), closeSeen = new HashSet<SteamArea>(); bool knobUsed, gumUsed;
-        public static float CloseChance = .6f;   // 测试可调成 1
+        public static float CloseChance = .8f;   // 测试可调成 1（V24：60% → 80%，V23 实测关阀回合只有 4%）
+        // V24：会用全部联动 —— 可乐弹射 / 果冻门帘 / 威化坡道 / 射可乐瓶 / 射火锅溢锅 / 射冰柜 / 射爆米花机 / 推甜甜圈
+        float colaUntil; bool colaUsed, curtainUsed, rampUsed, donutUsed; readonly HashSet<Object> propTried = new HashSet<Object>();
+        Object propTarget; Vector3 propAim; float propUntil; GiantDonut donutTarget; float donutUntil, propThinkAt;
+        public bool WantsCola { get { return Time.time < colaUntil; } }
+        public static int PropShots, DonutPushes, ColaDashes, CurtainCasts, RampCasts;   // 遥测 / 测试读
         // V10：狙击高台（只能踩弹射板上去）
         bool nesting; Vector3 nestPad, nestSpot, nestLook; float nestHeight, nestLeaveAfter;
         public bool WantsPad { get { return nesting && f.transform.position.y < nestHeight - 1.5f && FlatDist(nestPad, f.transform.position) < 2f; } }
@@ -45,7 +50,8 @@ namespace NeonSiege
         public Vector3 LookHint { get { return lookHint; } }
         public bool Looking { get { return Time.time < lookHintUntil; } }
 
-        void Start() { f = GetComponent<Fighter>(); accuracy = Random.Range(.45f, .65f); }
+        // V24：准度由 Match.BalanceBotSkill 按位置配对分配（两队平均相等），这里不再各自随机
+        void Start() { f = GetComponent<Fighter>(); }
 
         // 队友标记：都看过去；"这里 / 这儿能联动"时被选中的那个走过去；玩家标的敌人还会当成情报
         public void OnPing(Ping p, bool move)
@@ -75,6 +81,7 @@ namespace NeonSiege
             if (m.phase == Phase.Prep) { f.yaw = Mathf.MoveTowardsAngle(f.yaw, Attacker ? 90 : -90, 180 * Time.deltaTime); return; }
 
             if (forceGoal.HasValue) { MoveAlong(forceGoal.Value, false); return; }   // 测试用
+            CarrierWatchdog();
             if (Time.time >= thinkAt) { thinkAt = Time.time + .15f; Perceive(); }
             bool visible = target != null && target.alive && CanSee(target);
 
@@ -95,6 +102,7 @@ namespace NeonSiege
             target = null; heardAt = -10; corners = new Vector3[0]; usedMed = usedBreaker = false; nesting = false;
             linkGoalUntil = pingGoalUntil = lookHintUntil = 0; emberWall = null; potUsed = false;
             gateTry = null; gateGaveUp = false; wantCloseGate = false; valveTarget = null; closeTarget = null; closeTried.Clear(); knobUsed = gumUsed = false;
+            colaUntil = 0; colaUsed = curtainUsed = rampUsed = donutUsed = false; propTried.Clear(); propTarget = null; donutTarget = null;
             bool marksman = f.W.id == "DMR-3" || f.W.id == "BR-5";
             if (f.team == m.AttackingTeam)
             {
@@ -109,7 +117,8 @@ namespace NeonSiege
                 if (Random.value < .25f) f.routeName = options[Random.Range(0, options.Length)];
                 route = Arena.I.routes[f.routeName];
                 routeIdx = 0;
-                if (marksman && Random.value < .45f)
+                carrierBest = 999f; carrierBestAt = Time.time; carrierDirect = false;
+                if (marksman && m.BombCarrier != f && Random.value < .45f)   // V24 修复：携弹者永远不走狙击位
                 {
                     // 先上主街水塔压制中路，30 秒后跳下参与进攻
                     nesting = true; nestPad = new Vector3(-45, 0, 2.1f); nestSpot = new Vector3(-45, 6f, 7.6f); nestLook = new Vector3(30, 3f, 0);
@@ -186,7 +195,9 @@ namespace NeonSiege
 
             if (nesting)
             {
-                if (m.Planted || m.BombCarrier == f || Time.time - m.liveStartedAt > nestLeaveAfter) nesting = false;
+                // V24 修复：炸弹掉了且自己是最近的电脑攻方 → 也要下来捡
+                bool fetch = Attacker && m.bomb == BombState.Dropped && NearestAttackerTo(m.bombPos) == f;
+                if (m.Planted || m.BombCarrier == f || fetch || Time.time - m.liveStartedAt > nestLeaveAfter) nesting = false;
                 else { NestStep(); return; }
             }
 
@@ -361,10 +372,38 @@ namespace NeonSiege
 
         Fighter NearestAttackerTo(Vector3 p)
         {
+            // V24 修复：只在电脑里选（玩家离炸弹 6 m 内才算玩家去捡）—— 以前玩家最近时，所有电脑都不去捡，回合超时
             Fighter best = null; float bd = float.MaxValue;
             foreach (var o in Match.I.fighters)
-                if (o.alive && o.team == f.team) { float d = Vector3.Distance(o.transform.position, p); if (d < bd) { bd = d; best = o; } }
+            {
+                if (!o.alive || o.team != f.team) continue;
+                float d = Vector3.Distance(o.transform.position, p);
+                if (o.human && d > 6f) continue;
+                if (d < bd) { bd = d; best = o; }
+            }
             return best;
+        }
+
+        // V24 修复：携弹者兜底。离包点的路程 8 s 没缩短 2 m 以上（卡在高台 / 墙洞 / 门前），或回合只剩 40 s，
+        // 就丢掉原路线，直接按 NavMesh 走最近的包点；高处（y > 2.5，不在包点）先找最近的地面点下去。
+        float carrierBest = 999f, carrierBestAt; bool carrierDirect;
+        void CarrierWatchdog()
+        {
+            var m = Match.I;
+            if (m.BombCarrier != f || m.Planted || Match.Mode != GameMode.Bomb || route == null) return;
+            Vector3 pos = f.transform.position;
+            int site = SiteOf(route);
+            float d = FlatDist(Arena.SiteCenter(site), pos);
+            if (d < carrierBest - 2f) { carrierBest = d; carrierBestAt = Time.time; }
+            bool stalled = Time.time - carrierBestAt > 8f, late = m.roundClock < 40f;
+            if (carrierDirect || !(stalled || late)) return;
+            carrierDirect = true; nesting = false;
+            var steps = new List<Vector3>();
+            if (pos.y > 2.5f && Arena.SiteAt(pos) < 0 && NavMesh.SamplePosition(new Vector3(pos.x, 0, pos.z), out NavMeshHit low, 8f, NavMesh.AllAreas)) steps.Add(low.position);
+            steps.Add(Arena.SiteCenter(site));
+            route = steps.ToArray(); routeIdx = 0; f.routeName += stalled ? "→卡住直奔" : "→时间紧直奔";
+            repathAt = 0; carrierBestAt = Time.time;
+            if (m.autoplay) Debug.Log("NEON_CARRIER_DIRECT r" + m.round + " " + f.Hero.name + " stalled=" + stalled + " site=" + site + " pos=" + pos.ToString("F0"));
         }
 
         void ConsiderRotate()
@@ -384,6 +423,7 @@ namespace NeonSiege
         bool TryUseInteractables()
         {
             Vector3 pos = f.transform.position;
+            if (TryProps(pos)) return true;   // V24
             // closed shutter on our path → open it（V22：蒸笼门 4 秒掀不开就改走墙洞）
             foreach (var s in Arena.I.shutters)
             {
@@ -514,6 +554,78 @@ namespace NeonSiege
             return false;
         }
 
+        // ---------------------------------------------------------------- V24：机关联动（射爆 / 推倒）
+        // 听到敌人（4 s 内）在某个机关的效果范围里 → 30 m 内看得见这个机关就开枪打它（每个机关每回合每人试一次，最多 3 s）
+        bool TryProps(Vector3 pos)
+        {
+            var m = Match.I;
+            if (m.BombCarrier == f || f.bombBusy || !ToonAssets.Available) return false;
+            if (propTarget != null)
+            {
+                bool done = Time.time > propUntil || PropDone(propTarget);
+                if (done) { propTarget = null; return false; }
+                f.botMove = Vector3.zero;
+                AimToward(propAim, 320f, true);
+                if (Vector3.Angle(f.AimDir, propAim - f.Eye) < 4f) { f.botTrigger = f.W.automatic || (Time.frameCount & 4) == 0; if (f.botTrigger) PropShots++; }
+                if (f.ammo == 0) f.Reload();
+                return true;
+            }
+            if (donutTarget != null)
+            {
+                if (Time.time > donutUntil || !donutTarget.Usable(f)) { donutTarget = null; return false; }
+                Vector3 a = donutTarget.Anchor; a.y = donutTarget.transform.position.y;
+                if (FlatDist(a, pos) > 1.2f) { MoveAlong(a, true); AimToward(donutTarget.transform.position + Vector3.up, 240f, false); }
+                else { f.botUse = true; FaceFlat(donutTarget.transform.position); }
+                return true;
+            }
+            if (Time.time < propThinkAt || Time.time - heardAt > 4f) return false;
+            propThinkAt = Time.time + .5f;
+            Vector3 enemy = lastKnown;
+            // 推甜甜圈：敌人在它要滚过的那条街上（离滚动线 3 m 内、在前方 45 m 内），自己 14 m 内
+            if (!donutUsed)
+                foreach (var d in V24.Donuts)
+                {
+                    if (d == null || !d.Usable(f) || FlatDist(d.transform.position, pos) > 14f) continue;
+                    Vector3 to = enemy - d.home; to.y = 0; float along = Vector3.Dot(to, d.dir);
+                    if (along < 3f || along > V24.DonutRange || Links.SegFlatDist(d.home, d.home + d.dir * V24.DonutRange, enemy) > 3f) continue;
+                    donutUsed = true; donutTarget = d; donutUntil = Time.time + 5f; DonutPushes++;
+                    if (m.autoplay) Debug.Log("NEON_AI_V24 r" + m.round + " donut " + f.Hero.name);
+                    return true;
+                }
+            foreach (var p in PropCandidates())
+            {
+                if (p.key == null || propTried.Contains(p.key)) continue;
+                float dp = Vector3.Distance(p.aim, f.Eye);
+                if (dp > 30f || dp < 3f || FlatDist(p.effect, enemy) > p.radius) continue;
+                if (FlatDist(p.effect, pos) < p.radius * .8f) continue;   // 自己别站在效果范围里
+                if (Physics.Linecast(f.Eye, p.aim, out RaycastHit hh, ~0, QueryTriggerInteraction.Ignore) && FlatDist(hh.point, p.aim) > 1.2f) continue;
+                propTried.Add(p.key); propTarget = p.key; propAim = p.aim; propUntil = Time.time + 3f;
+                if (m.autoplay) Debug.Log("NEON_AI_V24 r" + m.round + " shoot " + p.name + " " + f.Hero.name);
+                return true;
+            }
+            return false;
+        }
+        struct PropC { public Object key; public Vector3 aim, effect; public float radius; public string name; }
+        IEnumerable<PropC> PropCandidates()
+        {
+            foreach (var h in HotpotHazard.All) if (h != null && !V24.PotRefilling(h)) yield return new PropC { key = h, aim = h.transform.position + Vector3.up * .6f, effect = h.transform.position, radius = V24.HotpotWaveRadius + 1f, name = "hotpot" };
+            foreach (var mp in MentosPile.All) if (mp != null && mp.Ready) yield return new PropC { key = mp, aim = mp.transform.position + Vector3.up * .85f, effect = mp.transform.position, radius = 5.5f, name = "cola" };
+            foreach (var sp in V24.Props)
+            {
+                if (sp == null || sp.broken) continue;
+                // 爆米花机：敌人在它附近 = 用烟挡住对方视线 / 脚步声
+                float r = sp.kind == ShootProp.Kind.Freezer ? V24.IceRadius : V24.PopcornRadius + 3f;
+                yield return new PropC { key = sp, aim = sp.Center, effect = sp.transform.position, radius = r, name = sp.kind.ToString() };
+            }
+        }
+        static bool PropDone(Object k)
+        {
+            if (k is HotpotHazard h) return V24.PotRefilling(h);
+            if (k is MentosPile mp) return !mp.Ready;
+            if (k is ShootProp sp) return sp.broken;
+            return true;
+        }
+
         // ---------------------------------------------------------------- perception
         void Perceive()
         {
@@ -641,7 +753,9 @@ namespace NeonSiege
             var w = f.W;
             float d = Vector3.Distance(target.transform.position, f.transform.position);
             float want = w.pellets > 1 ? 6f : w.fullRange * .8f;
-            bool anchored = !Attacker && FlatDist(holdSpot, f.transform.position) < 3f && !Match.I.Planted;
+            bool sniper = w.id == "DMR-3" || w.id == "BR-5";
+            if (sniper) want = 45f;   // V24：狙击手在 40–60 m 架枪，不往前凑（V23 远距离击杀只有 1%）
+            bool anchored = !Attacker && FlatDist(holdSpot, f.transform.position) < 3f && !Match.I.Planted || sniper && d < 62f;
             if (d > want * 1.7f && !anchored) MoveAlong(target.transform.position, false);
             else
             {
@@ -657,7 +771,7 @@ namespace NeonSiege
             bool head = accuracy > .6f && d < 25f;
             // lead the target by bullet travel time (visible projectiles have flight time)
             float tof = d / Mathf.Max(50f, w.bulletSpeed);
-            Vector3 aimPoint = (head ? target.Head : target.Chest) + aimError * errK * Mathf.Clamp(d / 15f, .5f, 2f) + target.velocity * (tof + .04f);
+            Vector3 aimPoint = (head ? target.Head : target.Chest) + aimError * errK * Mathf.Clamp(d / 15f, .5f, 2f) * (sniper ? .45f : 1f) + target.velocity * (tof + .04f);   // V24：狙击手远距离误差减半
             AimToward(aimPoint, 300f + accuracy * 200f, true);
             float ang = Vector3.Angle(f.AimDir, aimPoint - f.Eye);
             float tolerance = Mathf.Clamp(140f / Mathf.Max(d, 1f), 2.5f, 12f);
@@ -713,6 +827,40 @@ namespace NeonSiege
             if (Match.FFA || Match.Mode == GameMode.Cook || Match.Mode == GameMode.Grow) { if (f.role != Role.Raven) return false; }
             switch (f.role)
             {
+                case Role.Falcon:
+                {
+                    // V24：路线前方 4–8.5 m 有果冻弹床 → 对准它汽水冲刺 = 可乐弹射（每回合一次；携弹者不跳）
+                    if (colaUsed || visible || m.BombCarrier == f || Match.Mode != GameMode.Bomb || route == null || m.Planted) return false;
+                    foreach (var jp in JumpPad.All)
+                    {
+                        if (jp == null) continue;
+                        Vector3 c = jp.transform.position; float d = FlatDist(c, pos);
+                        if (d < 4f || d > 8.5f || Mathf.Abs(c.y - pos.y) > .6f || !RouteNear(c + Vector3.ProjectOnPlane(jp.WorldLaunch, Vector3.up).normalized * 6f, 18f)) continue;
+                        if (Physics.Linecast(pos + Vector3.up * .6f, c + Vector3.up * .4f, ~0, QueryTriggerInteraction.Ignore)) continue;
+                        FaceFlat(c); colaUntil = Time.time + Config.DashWindup + Config.DashTime + Config.DashPadWindow + .3f;
+                        if (Skills.Cast(f, c + (c - pos).normalized * 1.5f)) { colaUsed = true; ColaDashes++; if (m.autoplay) Debug.Log("NEON_AILINK r" + m.round + " cola " + f.Hero.name); return true; }
+                        colaUntil = 0; return false;
+                    }
+                    return false;
+                }
+                case Role.Ironwall:
+                {
+                    // V24：守包点（或攻方下包后守包）听到敌人 25 m 内逼近 → 在 5 m 内开着的门框挂果冻门帘（入口保底照旧由 CurtainAllowed 管）
+                    if (curtainUsed || visible || Match.Mode != GameMode.Bomb || Time.time - heardAt > 5f) return false;
+                    bool duty = !Attacker && !m.Planted && holdZone <= 1 || Attacker && m.Planted;
+                    if (!duty || FlatDist(lastKnown, pos) > 25f) return false;
+                    foreach (var fr in Links.Frames())
+                    {
+                        if (!fr.open || Links.CurtainOf(fr) != null || !LinkPlus.CurtainAllowed(fr)) continue;
+                        Vector3 to = fr.center - pos; float dy = to.y; to.y = 0;
+                        if (to.magnitude > Config.ShieldDockRange - .3f || Mathf.Abs(dy) > 1.5f) continue;
+                        FaceFlat(fr.center);
+                        if (Links.DockFrame(f, out _) == null) continue;
+                        if (Skills.Cast(f, fr.center)) { curtainUsed = true; CurtainCasts++; if (m.autoplay) Debug.Log("NEON_AILINK r" + m.round + " curtain " + f.Hero.name); return true; }
+                        return false;
+                    }
+                    return false;
+                }
                 case Role.Raven:
                     if (visible) return false;
                     foreach (var h in HotpotHazard.All)
@@ -775,6 +923,15 @@ namespace NeonSiege
                 case Role.Rivet:
                 {
                     if (Match.Mode != GameMode.Bomb) return false;
+                    // V24：进攻路线经过威化坡道点（坡底 7 m 内）→ 斜放威化给队友搭坡（每回合一次）
+                    if (!rampUsed && Attacker && !m.Planted && !visible && route != null)
+                        foreach (var rs in LinkPlus.Ramps)
+                        {
+                            if (rs == null || rs.ramp != null || FlatDist(rs.basePos, pos) > 7f || Mathf.Abs(rs.basePos.y - pos.y) > 1f || !RouteNear(rs.top, 15f)) continue;
+                            Vector3 mid = Vector3.Lerp(rs.basePos, rs.top, .5f); FaceFlat(mid);
+                            if (Skills.Cast(f, mid)) { rampUsed = true; RampCasts++; if (m.autoplay) Debug.Log("NEON_AILINK r" + m.round + " ramp " + f.Hero.name); return true; }
+                            break;
+                        }
                     bool duty = !Attacker && !m.Planted || Attacker && m.Planted;
                     if (!duty || visible && target != null && Vector3.Distance(target.transform.position, pos) < 12f) return false;
                     foreach (var b in Links.Breaches())

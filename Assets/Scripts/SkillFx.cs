@@ -521,7 +521,7 @@ namespace NeonSiege
             void Update()
             {
                 float age = Time.time - born, left = Life - age;
-                if (left <= 0 || Match.I == null || Match.I.phase != Phase.Live) { Fx.Burst(transform.position + Vector3.up * 2f, Vector3.up, Frost, 40, 5f, .12f, 1f, .3f); Sfx.Play("food_confetti", transform.position, .6f, 1.3f, 1f, 40f); UltFx.End(owner, Role.Phantom, transform.position); Destroy(gameObject); return; }
+                if (left <= 0 || Match.I == null || Match.I.phase != Phase.Live) { Fx.Burst(transform.position + Vector3.up * 2f, Vector3.up, Frost, 40, 5f, .12f, 1f, .3f); Sfx.Play("food_confetti", transform.position, .6f, 1.3f, 1f, 40f); UltFx.End(owner, Role.Phantom, transform.position); if (Match.I != null && Match.I.phase == Phase.Live) V24.FrostSnow(transform.position, Radius); Destroy(gameObject); return; }   // V24：结束时下一场糖霜雪（脚印能追踪）
                 if (Time.time >= nextSfx) { nextSfx = Time.time + .9f; Sfx.Play("food_frost_wind", transform.position, .6f, Random.Range(.9f, 1.1f), 1f, 45f); }
                 if (lamp != null) lamp.intensity = 3.5f + Mathf.PerlinNoise(Time.time * 3f, 0) * 2f;
                 var p = Match.I.player;

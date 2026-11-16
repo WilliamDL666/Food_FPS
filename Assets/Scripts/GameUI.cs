@@ -838,6 +838,13 @@ namespace NeonSiege
                     Icons.Draw(new Rect(r.x + 214, y + 6, 18, 18), Icons.Skull, new Color(1f, .35f, .35f, a));
                     Text(new Rect(r.x + 236, y, 90, 30), it.victim.Hero.name, With(small, 14, TextAnchor.MiddleRight), new Color(vc.r, vc.g, vc.b, a));
                     if (Portraits.hero.TryGetValue(it.victim.role, out var vt) && vt != null) { var o = GUI.color; GUI.color = new Color(.8f, .6f, .6f, a); GUI.DrawTextureWithTexCoords(new Rect(r.xMax - 30, y + 2, 26, 26), vt, new Rect(.25f, .62f, .5f, .35f)); GUI.color = o; }
+                    if (!string.IsNullOrEmpty(it.foodLine))   // V24：美食动词播报（爆头 = 一口闷）
+                    {
+                        Rect fr = new Rect(r.x + 10, y + 30, w - 20, 18);
+                        Round(new Rect(r.x + 4, y + 29, w - 8, 19), new Color(.03f, .05f, .09f, .55f * a), 9);
+                        Text(fr, it.foodLine, With(tiny, 12, TextAnchor.MiddleRight), it.head ? new Color(1f, .85f, .3f, a) : new Color(1f, .9f, .82f, a));
+                        y += 20;
+                    }
                 }
                 else
                 {

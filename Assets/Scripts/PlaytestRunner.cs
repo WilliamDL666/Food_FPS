@@ -118,13 +118,15 @@ namespace NeonSiege
             var falcon = Get(att, Role.Falcon);
             Place(falcon, new Vector3(16, .05f, 10.5f), 0);
             yield return new WaitForFixedUpdate(); yield return null;
+            float castAt = Time.time;
             bool cast = Skills.Cast(falcon, falcon.transform.position + Vector3.forward * 7);
-            bool cue = Sfx.LastPlayed == "thrusterFire";
             yield return new WaitForSeconds(.1f);
             float hp0 = falcon.hp + falcon.armor;
             falcon.ReceiveDamage(10, Other(def, 0), Vector3.zero, false);
             bool hurtInDash = falcon.hp + falcon.armor < hp0 && falcon.Dashing;
             yield return new WaitForSeconds(.5f);
+            // V24：冲刺只留开罐声（去掉叠加的 thrusterFire）；美食模式查"啵"开罐，非美食模式仍是喷射声
+            bool cue = Skills.Food ? Sfx.PlayedSince("food_can_open", castAt) && !Sfx.PlayedSince("thrusterFire", castAt) : Sfx.PlayedSince("thrusterFire", castAt);
             Vector3 fp = falcon.transform.position;
             int bad = 0; foreach (var o in Physics.OverlapCapsule(fp + Vector3.up * .45f, fp + Vector3.up * 1.4f, .3f, ~0, QueryTriggerInteraction.Ignore)) if (!o.transform.IsChildOf(falcon.transform)) bad++;
             Check("T01", "猎隼贴墙突进：无穿模、无无敌、启动提示可识别", cast && cue && bad == 0 && fp.z < 13.7f && hurtInDash,
@@ -534,6 +536,7 @@ namespace NeonSiege
                 if (ToonAssets.Available) yield return V23CombatTests();   // V23 a + c：视线 / 爆炸拆分、曼妥思喷泉、技能 / 大招美食表现（M55–M60）
                 yield return MapUiTests.Run(Check);                  // V23 b：地图 UI + 食材高亮（M70–M76，MapUiTests.cs）
                 yield return LinkTests.Run(Check);                   // V23 d：联动放大 + 副联动 + 硬约束（M85 起，LinkTests.cs）
+                yield return V24Tests.Run(Check);                    // V24：体验强化（M101 起，V24Tests.cs）
                 if (ToonAssets.Available) yield return V23PolishTests();   // V23 打磨：大招远景 / 可乐喷泉 / 食材光柱 / 左手道具 / 大地图（M77）
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }

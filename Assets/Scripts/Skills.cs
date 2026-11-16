@@ -219,7 +219,6 @@ namespace NeonSiege
                 // 汽水冲刺：开罐"嘶"一声（音量和可听距离与原喷射声相同：1.0 / 40 m，反制靠听）
                 // V23：前摇 = 摇罐（开罐声由 SkillHand 在前摇 60% 处播）；气泡喷射声在 DashRunner 进入位移时播（1.0 / 40 m，可听距离不变）
                 Sfx.Play("food_can_shake", f.transform.position, .9f, 1f, 1f, 40f);
-                Sfx.Play("thrusterFire", f.transform.position, .18f, 1.6f, 1f, 40f);   // 保留一层极轻的喷气声（0.18，T01 用它判定启动音效；拍板后可去掉）
                 Fx.Burst(f.transform.position + Vector3.up * .9f - dir * .4f, -dir, Cola, 30, 4, .12f, .4f, 0);
                 Fx.Burst(f.transform.position + Vector3.up * 1.1f, Vector3.up, Bubble, 14, 2, .07f, .4f, -.2f);
             }
@@ -545,7 +544,7 @@ namespace NeonSiege
 
     public class DashRunner : MonoBehaviour
     {
-        public Fighter owner; public Vector3 dir; float t, nextGhost; Light glow; bool fizzed; TrailRenderer trail;
+        public Fighter owner; public Vector3 dir; float t, nextGhost; Light glow; bool fizzed, canOpened; TrailRenderer trail;
         void Start()
         {
             glow = new GameObject("喷射光").AddComponent<Light>(); glow.transform.SetParent(owner.transform, false);
@@ -558,9 +557,12 @@ namespace NeonSiege
             t += Time.deltaTime;
             if (owner == null || !owner.alive) { Destroy(this); return; }
             Fx.Burst(owner.transform.position + Vector3.up * 1.1f - owner.transform.forward * .35f, -dir + Vector3.down * .3f, Skills.Food ? Skills.Cola : new Color(.4f, .75f, 1f), 4, 5, .12f, .25f, 0);   // 背后喷可乐泡沫
+            // V24：电脑没有第一人称左手（SkillHand 只给玩家播开罐声），在前摇 60% 处补一声同样的"啵"开罐（替代原来叠加的 thrusterFire）
+            if (Skills.Food && !owner.human && !canOpened && t >= Config.DashWindup * .6f) { canOpened = true; Sfx.Play("food_can_open", owner.transform.position, .8f, 1f, 1f, 20f); }
             if (t < Config.DashWindup) return;
             if (!fizzed) { fizzed = true; if (Skills.Food) { Sfx.Play("food_fizz", owner.transform.position, 1f, 1.1f, 1f, 40f); if (trail == null) trail = Skills.ColaTrail(owner); } }   // V23：进入位移才喷气泡；身后拉可乐尾迹
             if (Skills.Food && owner.human) SkillPop.EdgeBubbles = 1f;   // 屏幕边缘一圈焦糖色气泡流
+            V24.DashTrail(owner);   // V24：身后留一条可乐气泡带 2 s，队友踩上去 ×1.1
             if (Time.time >= nextGhost) { nextGhost = Time.time + .035f; Ghost.Spawn(owner, Skills.Food ? new Color(.6f, .75f, .9f) : new Color(.3f, .7f, 1f)); }   // 半透明气泡色残影
             float k = Mathf.Min(Time.deltaTime, Config.DashWindup + Config.DashTime - (t - Time.deltaTime));
             if (k > 0) owner.ApplyDash(dir * (Config.DashDistance / Config.DashTime) * k);
@@ -700,14 +702,21 @@ namespace NeonSiege
         void Cracks(int stage)
         {
             var dark = Arena.Glow(new Color(.45f, .3f, .15f), 0f);
-            for (int i = 0; i < 3 * stage; i++)
+            for (int i = 0; i < 2 + 2 * stage; i++)   // V24：越往后裂纹越多、越长，还会分叉
             {
                 var c = GameObject.CreatePrimitive(PrimitiveType.Cube); Destroy(c.GetComponent<Collider>()); c.name = "威化裂缝";
                 c.transform.SetParent(transform, false);
-                float side = i % 2 == 0 ? 1f : -1f;
-                c.transform.localPosition = new Vector3(Random.Range(-w * .4f, w * .4f), Random.Range(.25f, h - .2f), side * (thick / 2 + .006f));
-                c.transform.localRotation = Quaternion.Euler(0, 0, Random.Range(-60f, 60f)); c.transform.localScale = new Vector3(Random.Range(.25f, .55f), .025f, .01f);
+                float side = i % 2 == 0 ? 1f : -1f, len = Random.Range(.25f, .55f) * (1f + stage * .25f), rot = Random.Range(-60f, 60f);
+                Vector3 lp = new Vector3(Random.Range(-w * .4f, w * .4f), Random.Range(.25f, h - .2f), side * (thick / 2 + .006f));
+                c.transform.localPosition = lp;
+                c.transform.localRotation = Quaternion.Euler(0, 0, rot); c.transform.localScale = new Vector3(len, .025f + .006f * stage, .01f);
                 var r = c.GetComponent<Renderer>(); r.sharedMaterial = dark; r.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                if (stage >= 2)
+                {
+                    var b = GameObject.CreatePrimitive(PrimitiveType.Cube); Destroy(b.GetComponent<Collider>()); b.name = "威化裂缝分叉"; b.transform.SetParent(transform, false);
+                    b.transform.localPosition = lp + Quaternion.Euler(0, 0, rot) * Vector3.right * len * .3f; b.transform.localRotation = Quaternion.Euler(0, 0, rot + Random.Range(35f, 70f) * (Random.value < .5f ? 1 : -1));
+                    b.transform.localScale = new Vector3(len * .45f, .02f, .01f); var br = b.GetComponent<Renderer>(); br.sharedMaterial = dark; br.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                }
             }
         }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
@@ -717,7 +726,7 @@ namespace NeonSiege
             if (Skills.Food && hp > 0)
             {
                 // 耐久掉到 2/3、1/3 时掉饼干渣、颜色变暗（裂纹感）
-                int stage = hp < MaxHp / 3f ? 2 : hp < MaxHp * 2f / 3f ? 1 : 0;
+                int stage = Mathf.Clamp(Mathf.FloorToInt((1f - hp / MaxHp) * 5f), 0, 4);   // V24：每掉 20% 多一层裂纹（原来只有 2/3、1/3 两档）
                 if (stage > crackStage)
                 {
                     crackStage = stage;
@@ -969,6 +978,7 @@ namespace NeonSiege
         {
             Init(f, p, n); pot = h;
             fog = Links.MustardFog(h.transform.position, Links.PotRadius(h));
+            if (Skills.Food) V24.MustardMushroom(h.transform.position, Links.PotRadius(h));   // V24：锅里"轰"地冲起绿色蘑菇云
             lamp.range = 9; lamp.intensity = 4;
             Links.Trigger(LinkKind.MustardPot, f, h.transform.position + Vector3.up, (h is KitchenStation ? "回血炉 " : "") + Links.PotRadius(h).ToString("0") + " m 芥末呛雾 " + Config.MustardPotLife.ToString("0") + " 秒 · 雾里的人透视 + 变慢");
         }
@@ -1084,7 +1094,7 @@ namespace NeonSiege
     // 焚芯 · 定向爆破：0.9 s 声光预警 → 角色伤害上限 35，对轻型掩体 ×2
     public class BlastCharge : MonoBehaviour
     {
-        public Fighter owner; float armed; LineRenderer ring; Light lamp; float nextBeep; GameObject fill;
+        public Fighter owner; float armed; LineRenderer ring; Light lamp; float nextBeep; GameObject fill; bool sang;
         public WallPiece stuck;   // V22 第三期：粘在蛋糕墙上 → 开墙
         public static readonly List<BlastCharge> Live = new List<BlastCharge>();   // V21：敌方产物气泡用
         void OnEnable() { Live.Add(this); }
@@ -1115,6 +1125,7 @@ namespace NeonSiege
             // 引信"滋—滋—"：节奏 0.15 s、可听距离 35 m 与原蜂鸣相同
             if (Time.time >= nextBeep) { nextBeep = Time.time + .15f; Sfx.Play(Skills.Food ? "food_fuse" : "error", transform.position, 1f, Skills.Food ? 1f : 1.6f, 1f, 35f); }   // V23：新合成引信"滋—"，节奏 0.15 s / 35 m 不变
             if (Skills.Food) Burn(age / Config.BlastWarning);
+            if (Skills.Food && !sang && age >= Config.BlastWarning - V24.BirthdaySongAt) { sang = true; V24.BirthdaySong(transform.position); }   // V24：快炸时唱一句生日歌（预警）
             bool on = Mathf.Repeat(age * 7f, 1f) < .5f;
             lamp.intensity = on ? 5 : .5f; ring.enabled = on || age > .6f;
             float fk = Mathf.Clamp01(age / Config.BlastWarning) * Config.BlastRadius * 2;
@@ -1177,6 +1188,7 @@ namespace NeonSiege
                 if (ramp != null && ramp.owner != null && ramp.owner.team != owner.team) { ramp.TakeDamage(Config.BlastCoverDamage * Config.BlastCoverMultiplier, owner, true); effective = true; hitCover = true; }
             }
             LinkPlus.OnBlast(p);
+            if (Skills.Food) V24.FireAt(p, owner);   // V24：芥末雾碰到火 = 辣油爆燃
             bool sauceFire = LinkPlus.SauceIgnite(owner, p);   // V23 d 副联动：点酱（黄油着火时代替焦糖火）
             if (sauceFire) effective = true;
             if (stuck != null && stuck.wall != null && !hadHole)
@@ -1195,6 +1207,7 @@ namespace NeonSiege
                 {
                     Links.Trigger(LinkKind.CakeBreach, owner, hole.center + Vector3.up * 1.2f, "蛋糕墙炸出一个两人并排的大门（" + hole.width.ToString("0.0") + " m 宽）· 蛋糕粉尘 " + Config.CakeDustLife.ToString("0.#") + " 秒");
                     SteamArea.Spawn(SteamKind.Dust, w, hole.center + Vector3.up * 1.2f, Config.CakeDustRadius, Config.CakeDustLife, owner);   // V23 d：炸开瞬间洞口扬起蛋糕粉尘（同一套视线判定）
+                    if (Skills.Food) V24.CakeRubble(hole, owner);   // V24：碎蛋糕块留地上当临时掩体 20 s + 奶油滑地 4 s
                 }
             }
             if (effective) owner.stats.skillEffective++;

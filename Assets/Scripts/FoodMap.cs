@@ -174,7 +174,10 @@ namespace NeonSiege
     // 外观：奶白茶壶 + 红色阀门轮（MAP-A2），喷气时阀门轮转、壶嘴冒蒸汽。
     public class SteamValve : Interactable
     {
-        public const float Duration = 10f, Cooldown = 40f, Radius = 9f, HoldSecs = .5f;   // Radius = 中庭阀门（后厨见 areaRadius）
+        public const float Radius = 9f, HoldSecs = .5f;   // Radius = 中庭阀门（后厨见 areaRadius）
+        // V24 修复：时长 / 冷却以前写死 10 s / 40 s，Config.SteamAreaLife 改成 12 s 后阀门仍喷 10 s；改成读 Config
+        public static float Duration { get { return Config.SteamAreaLife; } }
+        public static float Cooldown { get { return Config.SteamAreaCooldown; } }
         public static readonly List<SteamValve> Valves = new List<SteamValve>();
         protected float activeUntil = -1, readyAt, firedAt = -9; protected ParticleSystem ps; protected Transform wheel; protected Light lamp;
         public float areaRadius = 9f, openHold = HoldSecs; public SteamArea area; public Fighter openedBy;
