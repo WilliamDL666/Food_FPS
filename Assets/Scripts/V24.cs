@@ -26,7 +26,7 @@ namespace NeonSiege
         public static float CandyTrailTime = 3f, FootprintLife = 6f;                              // 粘糖丝：3 s 内留粉色脚印（脚印 6 s 淡出）
         // 新机关
         public static int HotpotShots = 7; public static float HotpotShotWindow = 4f, HotpotWaveRadius = 4f, HotpotWaveLife = 3f, HotpotWaveDps = 10f, HotpotWaveAccel = .45f, HotpotRefill = 30f;
-        public static float FreezerHp = 90f, IceRadius = 6f, IceLife = 10f, IceAccel = .15f;
+        public static float FreezerHp = 90f, IceRadius = 6f, IceLife = 10f, IceAccel = .05f, IceSpeed = 1.12f;   // V24 收尾：×0.15 走上去几乎不滑 → ×0.05（5 m/s 要滑约 2.5 s 才停）+ 冰上最高速度 ×1.12
         public static float PopcornHp = 60f, PopcornRadius = 6f, PopcornLife = 6f;
         public static float DonutHold = 1f, DonutSpeed = 8f, DonutRange = 45f, DonutPush = 9f, DonutDamage = 20f, DonutRadius = 1.3f;
         // 技能 / 大招
@@ -66,10 +66,11 @@ namespace NeonSiege
                 PlaceDonut(new Vector3(-46, 0, -40f), Vector3.right);
             }
             catch (System.Exception e) { Debug.LogWarning("NEON_V24 dress failed: " + e); }
+            try { V25.Dress(arena); } catch (System.Exception e) { Debug.LogWarning("NEON_V25 dress failed: " + e); }
             Debug.Log("NEON_V24 props=" + Props.Count + " donuts=" + Donuts.Count);
         }
         // 在 near 附近 r 内找一个能站人、背后 1.4 m 内有墙的点（贴墙放，不挡路中间）
-        static bool FindWallSpot(Vector3 near, float r, out Vector3 spot, out Vector3 face)
+        public static bool FindWallSpot(Vector3 near, float r, out Vector3 spot, out Vector3 face)
         {
             spot = near; face = Vector3.forward;
             Vector3[] dirs = { Vector3.right, Vector3.left, Vector3.forward, Vector3.back };
@@ -142,12 +143,14 @@ namespace NeonSiege
         {
             float k = 1f;
             if (f.GetComponent<JellyStuck>() != null) k *= JellySlow;
+            k *= V25.SpeedMul(f);   // V25：被珍珠弹打中 ×0.9
             if (BubbleTrail.Boosts(f)) k *= BubbleTrailBoost;
+            if (SlickZone.AccelAt(f.transform.position) <= IceAccel + .001f) k *= IceSpeed;   // 冰面上越滑越快
             return k;
         }
         public static float AccelMul(Fighter f)
         {
-            if (!f.grounded) return 1f;
+            // V24 收尾：不再要求 grounded（刚放上去 / 下台阶那几帧 isGrounded 会抖，测试和实机都偶尔判成"没站在冰上"）；区域本身只有 1.2 m 高
             return SlickZone.AccelAt(f.transform.position);
         }
         // 代替 Move 里的 "verticalSpeed -= Gravity * dt"：可乐托举 / 悬浮 / 羽毛缓降
@@ -442,6 +445,7 @@ namespace NeonSiege
         {
             if (f == null || Match.I == null) return;
             var p = Match.I.player;
+            V25.OnUlt(f);   // V25：寿司雷达（小地图边缘转一圈回转寿司）
             if (f.human && f == p) { ultCamUntil = Time.time + UltCamTime; ultCamWho = f; UltCams++; f.ShowSelf(UltCamTime); }
             else if (p != null) { bigText = UltShout(f.role); bigCol = f.Hero.tint; bigAt = Time.time; }
         }

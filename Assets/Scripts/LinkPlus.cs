@@ -107,7 +107,7 @@ namespace NeonSiege
             a.kind = k; a.source = src; a.by = by; a.team = by != null ? by.team : -1; a.R = r; a.born = Time.time; a.until = Time.time + life; a.total = life; a.center = c;
             a.baseY = c.y - (k == SteamKind.Dust ? 1.2f : 1.8f);   // 中心都是"源 + 1.8 m"（阀门 / 锅 / 回血炉）或"洞口 + 1.2 m"（粉尘）；不用向下打射线，锅沿会被当成地面
             go.transform.position = new Vector3(c.x, a.baseY, c.z);
-            a.Build(k == SteamKind.Dust ? new Color(.95f, .85f, .7f) : k == SteamKind.Candy ? new Color(1f, .74f, .92f) : new Color(.97f, .98f, 1f));
+            a.Build(k == SteamKind.Dust ? new Color(.95f, .85f, .7f) : k == SteamKind.Candy ? new Color(1f, .74f, .92f) : new Color(.98f, .94f, 1f));   // V24 收尾：奶白带一点粉紫
             Skills.spawned.Add(go);
             LinkPlus.OnAreaSpawned(a);
             return a;
@@ -128,7 +128,7 @@ namespace NeonSiege
         void Tint(bool candy)
         {
             tintedCandy = candy;
-            Color pink = new Color(1f, .7f, .9f), white = new Color(1f, .96f, .98f), steam = new Color(.97f, .98f, 1f);
+            Color pink = new Color(1f, .7f, .9f), white = new Color(1f, .96f, .98f), steam = new Color(.98f, .94f, 1f);
             for (int i = 0; i < rends.Count; i++) if (rends[i] != null) Paint(rends[i].material, candy ? Color.Lerp(pink, white, (i * .37f) % 1f) : steam);
             if (ps != null) { var main = ps.main; main.startColor = candy ? new Color(1f, .78f, .94f, .85f) : new Color(1f, 1f, 1f, .8f); }
         }
@@ -662,6 +662,7 @@ namespace NeonSiege
         }
 
         // ---------------------------------------------------------------- 糊监控
+        public static readonly Color MapSteamColor = new Color(.55f, .68f, .95f, .62f);   // V25：小地图上普通整片蒸汽的颜色（蓝灰；测试 M88 也按这个颜色数）
         public static bool Gummed(SecurityCam c) { return c != null && gum.TryGetValue(c, out var n) && n != null && Time.time < n.EndsAt; }
         public static void GumCheck(NoiseField n)
         {
@@ -671,7 +672,7 @@ namespace NeonSiege
             {
                 if (c == null || !c.Working || Gummed(c)) continue;
                 if (Links.Flat(c.transform.position, n.transform.position) > Config.NoiseRadius + .5f) continue;
-                gum[c] = n;
+                gum[c] = n; V25.Hijack(c, n.owner);   // V25：糖丝接管监控（反过来偷看守方）
                 Links.Trigger(LinkKind.CamGum, n.owner, c.transform.position, "守方监控被棉花糖糊住 · 迷雾散掉前看不见");
             }
         }
@@ -768,7 +769,7 @@ namespace NeonSiege
             foreach (var a in SteamArea.Live)
             {
                 if (a == null || !a.Alive) continue;
-                Color col = a.kind == SteamKind.Dust ? new Color(.95f, .85f, .7f, .5f) : a.Candy ? new Color(1f, .65f, .9f, .5f) : new Color(1f, 1f, 1f, .55f);
+                Color col = a.kind == SteamKind.Dust ? (a.popcorn ? new Color(1f, .8f, .3f, .6f) : new Color(.85f, .65f, .45f, .6f)) : a.Candy ? new Color(1f, .45f, .8f, .62f) : MapSteamColor;   // V24 收尾：原来纯白 0.55 画在奶油色底图上几乎看不见 → 蓝灰 / 粉 / 黄，配深色描边
                 l.Add(new MapArea { c = a.center, r = Mathf.Max(a.Radius, a.R * .3f), left = a.until - Time.time, total = a.total, col = col });
             }
             foreach (var d in Drone.Live)

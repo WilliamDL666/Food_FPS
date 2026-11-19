@@ -761,6 +761,7 @@ namespace NeonSiege
             LinkHud.MapDraw(w => { var a = v.Map(w); return v.Inside(a, 6) ? a : new Vector2(-9999, -9999); }, false);
             // L7 / L8 队伍 + 敌情
             Fighters(v, p, false);
+            V25.MapOverlay(v, p, false);   // V25：监控红点 / 变身菜色光圈 / 寿司雷达
             // 自己：白箭头 + 视野扇形
             float fov = Camera.main != null ? Camera.main.fieldOfView * Camera.main.aspect * .62f : 75f;
             float heading = rotate ? 0 : p.yaw;
@@ -802,6 +803,7 @@ namespace NeonSiege
             if (LayerLink) LinkHud.MapDraw(wp => v.Map(wp), true);
             Labels(v);
             Fighters(v, p, true);
+            V25.MapOverlay(v, p, true);
             // 自己
             Vector2 me = v.Map(p.transform.position);
             MapGL.Wedge(me, 22, p.yaw - 35, p.yaw + 35, new Color(1, 1, 1, .18f));
@@ -863,7 +865,8 @@ namespace NeonSiege
                     MapGL.Disc(q, rp * (.3f + .08f * pulse), new Color(col.r, col.g, col.b, col.a * (.75f + .25f * pulse)), 20);
                 }
                 MapGL.Disc(a + new Vector2(Mathf.Sin(Time.time * .9f + seed), Mathf.Cos(Time.time * .7f + seed)) * rp * .15f, rp * .4f, new Color(Mathf.Min(1, col.r + .1f), Mathf.Min(1, col.g + .1f), Mathf.Min(1, col.b + .1f), col.a * .8f), 24);
-                if (total > 0) MapGL.Ring(a, rp, 2, new Color(col.r, col.g, col.b, .9f), 0, 360 * Mathf.Clamp01(left / total));
+                MapGL.Ring(a, rp * .98f, big ? 2.5f : 1.8f, new Color(col.r * .45f, col.g * .45f, col.b * .55f, .85f));   // V24 收尾：深色描边，浅色底图上也看得见
+                if (total > 0) MapGL.Ring(a, rp + 2.5f, 2.5f, new Color(Mathf.Min(1, col.r + .2f), Mathf.Min(1, col.g + .2f), Mathf.Min(1, col.b + .2f), .95f), 0, 360 * Mathf.Clamp01(left / total));
             }
             foreach (var z in LinkPlus.MapAreas()) Area(z.c, z.r, z.col, z.left, z.total);   // V23 d：整片蒸汽 / 棉花糖蒸汽 / 蛋糕粉尘 / 芥末呛雾（含剩余时间环，双方都画）
             foreach (var nf in NoiseField.Live) if (nf != null) Area(nf.transform.position, Config.NoiseRadius, new Color(.9f, .5f, 1f, .35f), nf.EndsAt - Time.time, Config.NoiseLife);

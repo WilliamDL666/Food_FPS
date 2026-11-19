@@ -327,7 +327,7 @@ namespace NeonSiege
         {
             if (!alive || Match.I == null) return;
             bool canAct = Match.I.CanAct;
-            bool frozen = Match.I.phase == Phase.RoundEnd || Match.I.phase == Phase.MatchEnd || (human && Match.I.ui != null && Match.I.ui.Blocking);
+            bool frozen = Match.I.phase == Phase.RoundEnd || Match.I.phase == Phase.MatchEnd || (human && Match.I.ui != null && Match.I.ui.Blocking) || (human && CamView.Active);   // V25：看监控时不能动
             if (IsReloading && Time.time >= reloadEndAt) { ammo = W.magazine; reloadEndAt = 0; }
             if (skillCharges < Hero.skill.maxCharges && Match.I.CanAct)
             {
@@ -780,6 +780,7 @@ namespace NeonSiege
                 if (Bullet.Current != null && Bullet.Current.dmgMul < 1f) stats.pierced++;
                 stats.armorDamage += rec.armor;
                 FoodState.OnHit(this, f, dmg);
+                V25.OnGunHit(this, f, h.point);   // V25：珍珠弹打中减速 10%
                 if (killed && ToonAssets.Available) { if (human) Collection.AddKill(); else if (Random.value < .35f) Food.Emote("Wave"); }
                 if (ToonAssets.Available && w.id == "BR-5") f.creamUntil = Time.time + .8f;   // 奶油糊在身上：短暂减速
                 if (human)
@@ -860,7 +861,7 @@ namespace NeonSiege
         public void Reload()
         {
             if (IsReloading || ammo >= W.magazine || !alive) return;
-            reloadDuration = ammo > 0 ? W.reloadTac : W.reloadEmpty;   // V20：战术换弹（还有子弹）比空仓换弹快
+            reloadDuration = (ammo > 0 ? W.reloadTac : W.reloadEmpty) * V25.ReloadMul(this);   // V20：战术换弹（还有子弹）比空仓换弹快；V25：加料奶茶期间快 30%
             reloadEndAt = Time.time + reloadDuration; burstLeft = 0;
             Sfx.Play(W.pellets > 1 ? "reload_shotgun" : W.id == "SMG-7" || W.id == "P-9" ? "reload_pistol" : W.id == "DMR-3" ? "reload_dmr" : "reload_rifle", transform.position, human ? .6f : .7f, W.reload < 2f ? 1.1f : 1f, human ? 0 : 1, 18f);
             if (human && viewParts != null && viewParts.mag != null)

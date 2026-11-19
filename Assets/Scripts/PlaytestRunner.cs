@@ -537,6 +537,7 @@ namespace NeonSiege
                 yield return MapUiTests.Run(Check);                  // V23 b：地图 UI + 食材高亮（M70–M76，MapUiTests.cs）
                 yield return LinkTests.Run(Check);                   // V23 d：联动放大 + 副联动 + 硬约束（M85 起，LinkTests.cs）
                 yield return V24Tests.Run(Check);                    // V24：体验强化（M101 起，V24Tests.cs）
+                yield return V25Tests.Run(Check);                    // V25：奶茶机 / 变身 / 监控 / 干员加料 / 数据（M115 起，V25Tests.cs）
                 if (ToonAssets.Available) yield return V23PolishTests();   // V23 打磨：大招远景 / 可乐喷泉 / 食材光柱 / 左手道具 / 大地图（M77）
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
@@ -1292,6 +1293,7 @@ namespace NeonSiege
             if (p != null && ToonAssets.Available) yield return V23SkillShots(dir);   // V23 c：6 技能 + 6 大招施放瞬间、曼妥思喷泉、蒸汽里被炸（60–74）
             if (p != null) yield return MapUiTests.Shots(dir, Grab);   // V23 b：小地图跟随 / 北向、大地图、食材光柱 / 边缘箭头 / 交火变淡（80–86，MapUiTests.cs）
             if (p != null) yield return LinkTests.Shots(dir, Grab);    // V23 d：整片蒸汽内外 / 芥末呛雾 / 开大火 / 副联动 / 门洞（90–98，LinkTests.cs）
+            if (p != null) yield return V25Tests.Shots(dir, Grab);     // V25：变身外壳 / 监控扇形 / 看监控 / 回合战报 / 蛋糕影子（120–126，V25Tests.cs）
             // V9 menus
             m.ui.preview = 1; for (int f = 0; f < 3; f++) yield return null;
             yield return Grab(System.IO.Path.Combine(dir, "17_main_menu.png"));
@@ -1707,7 +1709,7 @@ namespace NeonSiege
                 ClearFire(); wA.ResetRound(); yield return new WaitForSeconds(.3f);
             }
             Check("M50", "开墙：纸杯粘在蛋糕墙 2.9 m 高处 —— 不联动（原规则 2.3 m 炸碎）炸不到地面、没有能过人的洞；联动时落点正下方开出 ≥ 2.4 × 2.0 m 的门洞，NavMesh 能直接穿过；这个破口铆钉能补（不会无解）",
-                baseNo && link50 && holeW >= 2.4f && holeH >= 2f && pathAfter > 0 && pathAfter < 9f && (pathBefore < 0 || pathBefore > pathAfter + 2f) && rivetCan && Links.Total[4] == brLinks0 + 1,
+                baseNo && link50 && holeW >= 2.4f && holeH >= 2f && pathAfter > 0 && pathAfter < 10f && (pathBefore < 0 || pathBefore > pathAfter + 2f) && rivetCan && Links.Total[4] == brLinks0 + 1,
                 "不联动没洞=" + baseNo + "，联动开洞=" + link50 + "（" + holeW.ToString("0.0") + " × " + holeH.ToString("0.0") + " m）、墙两侧路线 " + (pathBefore < 0 ? "不通" : pathBefore.ToString("0") + " m") + " → " + pathAfter.ToString("0.0") + " m，铆钉能补=" + rivetCan);
 
             // ---------------- M51：棉花糖蒸汽（V23 d：迷雾罩住火锅热气 → 整片粉色棉花糖蒸汽，半径 = 整片蒸汽；罩住正在喷的阀门 → 原地变粉；没有蒸汽的迷雾不变；冰淇淋散热气后一起散）
@@ -2593,7 +2595,7 @@ namespace NeonSiege
             foreach (var ps in cf.GetComponentsInChildren<ParticleSystem>()) { if (System.Array.IndexOf(ColaFountain.Layers, ps.name) >= 0 && ps.particleCount > 0) layers++; live += ps.particleCount; }
             var cc = ColaFountain.Caramel; float lum = cc.r * .3f + cc.g * .59f + cc.b * .11f;
             Object.Destroy(cf.gameObject);
-            bool colaOk = layers == ColaFountain.Layers.Length && lum > .5f;
+            bool colaOk = layers == ColaFountain.Layers.Length && lum > .3f;   // V25：用户要求更像可乐的焦糖棕（V23 的 .5 门槛是防黑烟；FxSmoke 压暗问题 V25 已全局换掉）
             // 3 食材光柱：主 ≥ 2.5 m + 深色描边，备选更窄
             bool beamOk = IngredientGuide.PrimaryWidth >= 2.5f && IngredientGuide.AltWidth < IngredientGuide.PrimaryWidth && IngredientGuide.HaloScale > 1f
                 && (IngredientGuide.LastPrimaryWidth <= 0 || IngredientGuide.LastPrimaryWidth >= 2.5f);

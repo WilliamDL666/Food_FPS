@@ -75,7 +75,7 @@ namespace NeonSiege
                     }
                 }
             }
-            return k.kind == KitchenStation.Kind.HotpotHeal ? "G 涮火锅回血" : k.kind == KitchenStation.Kind.MilkTea ? "G 喝奶茶补弹药" : k.kind == KitchenStation.Kind.Oven ? "G 烤枪 · 伤害 +15%" : "G 拿冰护甲";
+            return k.kind == KitchenStation.Kind.HotpotHeal ? "G 涮火锅回血" : k.kind == KitchenStation.Kind.MilkTea ? "G 喝加料奶茶" : k.kind == KitchenStation.Kind.Oven ? "G 烤枪 · 伤害 +15%" : "G 拿冰护甲";
         }
 
         // ---- ③ HUD：差一样
@@ -232,10 +232,10 @@ namespace NeonSiege
                 case "ingredient": return "再捡一样能凑成菜就会变身。配方看头顶气泡，或者按 H 看菜谱";
                 case "force_pick": return "走过去不会自动捡。真想要黑暗料理，就按住 G 硬捡";
                 case "station_HotpotHeal": return "按住 G 涮：每秒 +10 生命，最多 60，然后冷却 30 秒；热气会暴露你";
-                case "station_MilkTea": return "按住 G 0.8 秒：补满弹药和手雷，冷却 40 秒";
+                case "station_MilkTea": return "按住 G 0.8 秒：20 秒珍珠弹（打中减速 10%）、换弹快 30%、+1 手雷，冷却 40 秒";
                 case "station_Oven": return "按住 G 5 秒把枪烤成金黄酥脆：伤害 +15%，冷却 20 秒";
                 case "station_Freezer": return "按住 G 1.5 秒拿冰护甲：+50 护甲、稍微变慢，冷却 60 秒";
-                case "delivery": return "看地上的落点圈，抢到：随机变身 + 补满弹药 + 金黄酥脆";
+                case "delivery": return "看地上的落点圈，抢到：随机变身 + 补满手雷 + 金黄酥脆";
                 case "ult": return p == null ? null : "按 X 放「" + FoodState.UltName(p.role) + "」：" + FoodGuide.UltEffect(p.role);
                 case "skill": return p == null ? null : "F「" + p.Hero.skill.Name + "」：" + p.Hero.skill.HowTo;
                 case "sauce": return "巧克力酱变慢、黄油打滑；番茄酱打黄油更滑，麻辣火锅打巧克力会烫";

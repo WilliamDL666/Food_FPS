@@ -165,6 +165,7 @@ namespace NeonSiege
             var em = aura.emission; em.rateOverTime = fm == FoodForm.Dark ? 30 : 14;
             var sh = aura.shape; sh.shapeType = ParticleSystemShapeType.Sphere; sh.radius = .6f;
             go.GetComponent<ParticleSystemRenderer>().material = fm == FoodForm.Dark ? (Resources.Load<Material>("Materials/FxSmoke") ?? Fx.Additive) : Fx.Additive;
+            V25.OnBecome(f, fm);   // V25：变身那一下的大字 / 镜头 / 专属音效；外壳；第一人称装饰
         }
 
         public void EndForm(bool announce)
@@ -175,6 +176,7 @@ namespace NeonSiege
             if (formHat != null) Destroy(formHat);
             if (aura != null) Destroy(aura.gameObject);
             if (announce && f.human && f.alive) Match.I.Feed("变身结束", new Color(.8f, .85f, .9f));
+            V25.OnFormEnd(f, form, announce);   // V25：外壳"啪"地碎掉 + 屏幕中间"变身结束"
             form = FoodForm.None;
         }
 
@@ -502,7 +504,7 @@ namespace NeonSiege
             switch (kind)
             {
                 case Kind.HotpotHeal: return f.hp < Config.MaxHp && (!healed.TryGetValue(f, out float h) || h < 60f);
-                case Kind.MilkTea: return f.ammo < f.W.magazine || f.grenades < 1;
+                case Kind.MilkTea: return true;   // V25：加料奶茶（甲）随时能喝，只看冷却
                 case Kind.Oven: return !f.Food.crispy;
                 default: return f.armor <= Config.MaxArmor;
             }
@@ -512,7 +514,7 @@ namespace NeonSiege
             switch (kind)
             {
                 case Kind.HotpotHeal: return "按住 G 涮一涮（每秒 +10 生命，最多 60；热气会暴露你）";
-                case Kind.MilkTea: return "按住 G 喝奶茶（补满弹药和手雷）";
+                case Kind.MilkTea: return "按住 G 喝加料奶茶（" + V25.BobaTime.ToString("0") + " 秒珍珠弹：打中减速 · 换弹快 30% · +1 手雷）";
                 case Kind.Oven: return "按住 G 把枪烤 5 秒（金黄酥脆版：伤害 +15%）";
                 default: return "按住 G 拿冰护甲（+50 护甲，稍微变慢）";
             }
@@ -533,7 +535,7 @@ namespace NeonSiege
                     break;
                 }
                 case Kind.MilkTea:
-                    f.ammo = f.W.magazine; f.grenades = Mathf.Max(f.grenades, 1); cooldown[f] = Time.time + 40f;
+                    f.ammo = f.W.magazine; V25.DrinkBoba(f); cooldown[f] = Time.time + 40f;   // V25：加料奶茶（甲）
                     Sfx.Play("food_boba", transform.position, .8f, .8f, 1f, 15f); Fx.Burst(f.Chest, Vector3.up, new Color(.85f, .62f, .42f), 14, 2f, .06f, .5f, .3f); break;
                 case Kind.Oven:
                     f.Food.crispy = true; cooldown[f] = Time.time + 20f;
@@ -584,7 +586,7 @@ namespace NeonSiege
             }
             var l = new GameObject("信号灯").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up; l.color = new Color(1f, .6f, .8f); l.range = 6; l.intensity = 3;
             Live.Add(c);
-            Match.I.Feed("外卖到了！无人机正在空投一个外卖箱 · 抢到：随机变身 + 补满弹药 + 酥脆", new Color(1f, .7f, .85f));
+            Match.I.Feed("外卖到了！无人机正在空投一个外卖箱 · 抢到：随机变身 + 补满手雷 + 酥脆", new Color(1f, .7f, .85f));
             Sfx.Ui("maximize", .5f, 1.4f);
             return c;
         }
@@ -608,7 +610,7 @@ namespace NeonSiege
         void Open(Fighter f)
         {
             FoodFx.KillPop(transform.position + Vector3.up * .5f);
-            f.ammo = f.W.magazine; f.Food.crispy = true;
+            f.grenades = Mathf.Max(f.grenades, V25.MaxGrenades); f.Food.crispy = true;   // V25：子弹本来就无限 → "补满弹药"改成"补满手雷"
             if (Match.Mode == GameMode.Cook) { f.Food.ingredients.Clear(); f.Food.ingredients.Add(Ingredients.All[Random.Range(0, Ingredients.All.Length)]); f.Food.ingredients.Add(Ingredients.All[Random.Range(0, Ingredients.All.Length)]); }
             else f.Food.Become(Ingredients.Forms[Random.Range(0, 6)]);
             Match.I.Feed((f.human ? "你" : f.Hero.name) + " 抢到了外卖箱！", new Color(1f, .7f, .85f));
@@ -680,7 +682,7 @@ namespace NeonSiege
     public class ColaFountain : MonoBehaviour
     {
         // V23 打磨：焦糖棕半透明水柱 + 橙色发光芯 + 大量白泡沫 / 气泡 + 顶部泡沫花 + 底部泡沫圈（原来深棕色 Alpha Blended 叠成一柱黑烟）
-        public static readonly Color Caramel = new Color(.92f, .55f, .22f, .6f), CaramelLight = new Color(1f, .76f, .42f, .5f);
+        public static readonly Color Caramel = new Color(.62f, .32f, .11f, .78f), CaramelLight = new Color(.86f, .5f, .2f, .65f);   // V25：更像可乐的焦糖棕（V24 偏奶白）；FxSmoke 已换成不压暗的材质，深色不会再发黑
         public static readonly string[] Layers = { "可乐水柱", "亮芯", "泡沫", "气泡", "泡沫花", "底部泡沫" };
         float born, reliftAt; ParticleSystem col, core, foam, bubbles, bloom, baseFoam; Light lamp;
         public static ColaFountain Spawn(Vector3 at) { var go = new GameObject("可乐喷泉"); go.transform.position = at; var f = go.AddComponent<ColaFountain>(); f.born = Time.time; return f; }
@@ -699,7 +701,7 @@ namespace NeonSiege
         {
             col = Make(Layers[0], Caramel, CaramelLight, .3f, .6f, 11f, 14f, 200f, .22f, 1f, UltFx.SoftMat);   // 亮焦糖色 + 半透明（深棕色叠起来会发黑）
             core = Make(Layers[1], new Color(1f, .55f, .15f, .55f), new Color(1f, .85f, .5f, .45f), .25f, .45f, 12f, 14.5f, 120f, .12f, 1f, Fx.Additive);   // 发光芯：逆光也像透亮的汽水
-            foam = Make(Layers[2], Color.white, new Color(1f, .95f, .85f), .45f, 1.1f, 8f, 13f, 180f, .35f, .9f, UltFx.SoftMat);
+            foam = Make(Layers[2], new Color(1f, .9f, .78f), new Color(.95f, .78f, .58f), .4f, .9f, 8f, 13f, 80f, .35f, .9f, UltFx.SoftMat);   // V25：泡沫 180 → 80、带一点焦糖色
             bubbles = Make(Layers[3], new Color(1f, 1f, 1f, .9f), new Color(.9f, .97f, 1f, .8f), .08f, .18f, 3f, 7f, 120f, .6f, -.05f, Fx.Additive);
             { var m = bubbles.main; m.startLifetime = new ParticleSystem.MinMaxCurve(1.2f, 2f); var sh = bubbles.shape; sh.angle = 25f; var n = bubbles.noise; n.enabled = true; n.strength = .8f; n.frequency = 1.2f; }
             bloom = Make(Layers[4], Color.white, new Color(1f, .93f, .8f), .5f, 1.2f, 2.5f, 5f, 100f, .6f, .5f, UltFx.SoftMat);   // 顶上散开成泡沫花（水柱约 1 s 到顶）
@@ -809,6 +811,10 @@ namespace NeonSiege
     public class JellyDome : MonoBehaviour
     {
         Fighter owner; float born, tick;
+        public static readonly List<JellyDome> Live = new List<JellyDome>();   // V25：罩子里敌方子弹变慢
+        public Fighter Owner { get { return owner; } }
+        void OnEnable() { Live.Add(this); }
+        void OnDisable() { Live.Remove(this); }
         public static void Spawn(Vector3 at, Fighter owner)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Sphere); go.name = "果冻罩"; Destroy(go.GetComponent<Collider>());
@@ -858,7 +864,7 @@ namespace NeonSiege
     {
         Fighter owner; Vector3 center; int dropped; float next;
         public int Dropped { get { return dropped; } }   // V22 第三期：测试读"生效时间不变"
-        public static void Spawn(Vector3 at, Fighter owner) { var go = new GameObject("蜡烛轰炸"); var c = go.AddComponent<CandleBarrage>(); c.owner = owner; c.center = at; c.next = Time.time + .3f; if (Skills.Food) c.Queue(); }
+        public static void Spawn(Vector3 at, Fighter owner) { var go = new GameObject("蜡烛轰炸"); var c = go.AddComponent<CandleBarrage>(); c.owner = owner; c.center = at; c.next = Time.time + .3f; if (Skills.Food) { c.Queue(); V25.CakeShadow(at); } }   // V25：蜡烛落下前天上先出现巨型蛋糕的影子
         // V23：下一根蜡烛的落点提前抽好，好让蜡烛在落地前 0.3 s 就从天上落下（落地 / 爆炸时刻不变）
         Vector2 nextR; bool queued; Transform falling; float fallStart;
         void Queue()

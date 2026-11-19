@@ -745,6 +745,7 @@ namespace NeonSiege
             Round(pr, p.Hero.tint, 10, 1.5f);
             Text(new Rect(132, H - 150, 200, 30), p.Hero.name, large, Color.Lerp(p.Hero.tint, Color.white, .35f));
             Text(new Rect(214, H - 150, 120, 30), p.Hero.duty, With(tiny, 13, TextAnchor.MiddleLeft));
+            Text(new Rect(290, H - 150, 140, 30), "甲 " + p.armorClass + " 级 · 盔 " + p.helmetClass + " 级", With(tiny, 12, TextAnchor.MiddleLeft), new Color(.6f, .85f, 1f));   // V24：护甲 / 头盔等级（以前只在 F1 面板里看得到）
             // armor
             Text(new Rect(132, H - 120, 60, 22), "护甲", tiny, new Color(.5f, .85f, 1f));
             for (int i = 0; i < 5; i++)
@@ -1005,7 +1006,7 @@ namespace NeonSiege
         {
             string[] map = { "闪光圈 + 头顶「G」气泡 = 可以交互，灰色 = 现在用不了", "零食：按住 G 吃掉，+25 生命（猎隼 +50；变大模式 +1 级）", "火锅回血炉：每秒 +10，最多 60，冷却 30 秒；热气暴露你",
                 "奶茶机补弹药（冷却 40 秒）· 烤箱伤害 +15%（20 秒）", "冰柜：+50 冰护甲，稍微变慢（冷却 60 秒）", "食材：两样凑成一道菜就变身；凑不成的要按住 G 才捡",
-                "外卖箱：随机变身 + 补满弹药 + 金黄酥脆", "果冻弹床弹你上高处 · 传菜转盘会转", "巧克力酱减速 · 黄油打滑 · 地图火锅会烫、热气挡视线", "蛋糕墙能打穿；奶油裱花（BR-5）打它是补墙",
+                "外卖箱：随机变身 + 补满手雷 + 金黄酥脆", "果冻弹床弹你上高处 · 传菜转盘会转", "巧克力酱减速 · 黄油打滑 · 地图火锅会烫、热气挡视线", "蛋糕墙能打穿；奶油裱花（BR-5）打它是补墙",
                 "金色 ★ = 你的技能能在这里联动 · 中键标记（敌人 / 这里 / 能联动）" };
             for (int i = 0; i < map.Length; i++) Text(new Rect(x + 36, y + i * 30, pw * .5f, 28), map[i], With(small, 14, TextAnchor.MiddleLeft));
             Text(new Rect(x + pw * .56f, y - 4, 400, 34), "6 种食物反应", large);
@@ -1062,7 +1063,7 @@ namespace NeonSiege
                 if (Portraits.hero.TryGetValue(hero.role, out var tex) && tex != null) GUI.DrawTexture(art, tex, ScaleMode.ScaleAndCrop);
                 Fill(new Rect(art.x, art.yMax - 46, art.width, 46), new Color(0, 0, 0, .55f));
                 Text(new Rect(art.x + 12, art.yMax - 46, art.width, 30), hero.name, With(large, 26, TextAnchor.MiddleLeft), Color.Lerp(hero.tint, Color.white, .35f));
-                Text(new Rect(art.x + 12, art.yMax - 20, art.width, 18), hero.duty + " · " + (i + 1), With(tiny, 12, TextAnchor.MiddleLeft));
+                Text(new Rect(art.x + 12, art.yMax - 20, art.width, 18), hero.duty + " · " + (i + 1) + " · 护甲 " + hero.armorClass + " 级 / 头盔 " + hero.helmetClass + " 级", With(tiny, 12, TextAnchor.MiddleLeft));   // V24：选英雄时就能看到防护等级
                 if (mate != null) { Round(new Rect(art.xMax - 92, art.y + 8, 84, 22), new Color(0, 0, 0, .7f), 11); Text(new Rect(art.xMax - 92, art.y + 8, 84, 22), "队友已选", With(tiny, 12, TextAnchor.MiddleCenter), new Color(1f, .8f, .5f)); }
                 float ty = art.yMax + 8;
                 if (Portraits.gun.TryGetValue(hero.role, out var gtex) && gtex != null) GUI.DrawTexture(new Rect(cx + 10, ty, cw - 20, 52), gtex, ScaleMode.ScaleToFit);

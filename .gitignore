@@ -23,3 +23,7 @@
 /.claude.backup-*/
 /production/session-logs/
 .claude/settings.local.json
+
+# Python 缓存
+__pycache__/
+*.pyc

@@ -12,6 +12,7 @@ Shader "NeonSiege/Outline"
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            #pragma multi_compile_fog   // V24：原来有 UNITY_APPLY_FOG 但没开 fog 变体 → 描边不吃雾，整片蒸汽里还能看到人的黑色轮廓
             #include "UnityCG.cginc"
             half4 _Color; float _Width;
             struct v2f { float4 pos : SV_POSITION; UNITY_FOG_COORDS(0) };

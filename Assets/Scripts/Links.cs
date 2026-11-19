@@ -221,7 +221,7 @@ namespace NeonSiege
             // 地面黄绿辣雾（LINK-4）
             var ps = new GameObject("辣雾").AddComponent<ParticleSystem>(); ps.transform.SetParent(go.transform, false); ps.transform.localPosition = Vector3.up * .4f;
             var main = ps.main; main.startLifetime = new ParticleSystem.MinMaxCurve(1.8f, 3f); main.startSpeed = new ParticleSystem.MinMaxCurve(.2f, .7f); main.startSize = new ParticleSystem.MinMaxCurve(1.4f, 2.8f);
-            main.startColor = new Color(.78f, 1f, .2f, .62f);   // V24：浓黄绿（原 .45 透明度远处看不出） main.maxParticles = 700; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;
+            main.startColor = new Color(.78f, 1f, .2f, .62f); main.maxParticles = 700; main.simulationSpace = ParticleSystemSimulationSpace.World; main.gravityModifier = -.02f;   // V24：浓黄绿（原 .45 透明度远处看不出）；V24 收尾修复：上一版注释吞掉了后半行（粒子上限 / 世界坐标 / 上浮）
             main.startSize = new ParticleSystem.MinMaxCurve(1.8f, 3.4f);   // V23 d：齐腰高的浓黄绿雾
             var em = ps.emission; em.rateOverTime = 70;
             var sh = ps.shape; sh.shapeType = ParticleSystemShapeType.Circle; sh.radius = R * .85f; sh.rotation = new Vector3(-90, 0, 0);
@@ -234,7 +234,7 @@ namespace NeonSiege
             var pe = plume.emission; pe.rateOverTime = 30; var psh = plume.shape; psh.shapeType = ParticleSystemShapeType.Cone; psh.angle = 12; psh.radius = .6f;
             plume.GetComponent<ParticleSystemRenderer>().material = Fx.Smoke;
             var ring = new GameObject("辣雾范围").AddComponent<LineRenderer>(); ring.transform.SetParent(go.transform, false);
-            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .35f; ring.startColor = ring.endColor = new Color(.85f, 1f, .2f, 1f);   // V24：边界圈加粗加亮（远处一眼看见） ring.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            ring.material = Fx.Additive; ring.startWidth = ring.endWidth = .35f; ring.startColor = ring.endColor = new Color(.85f, 1f, .2f, 1f); ring.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;   // V24：边界圈加粗加亮（远处一眼看见）
             Skills.Circle(ring, Skills.GroundAt(at + Vector3.up), R);
             var l = new GameObject("辣雾光").AddComponent<Light>(); l.transform.SetParent(go.transform, false); l.transform.localPosition = Vector3.up * 1.5f; l.color = Skills.Mustard; l.range = R * 1.6f; l.intensity = 2.2f;
             // V24：地面铺一层半透明黄绿圆盘，和边界圈一起扩散（只是表现，判定半径不变）

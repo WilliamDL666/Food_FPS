@@ -621,6 +621,7 @@ namespace NeonSiege
             if (CombatHud.LastHit(victim, out HitRecord kb)) { item.gun = kb.gun; item.cause = kb.weapon ?? ""; item.kind = kb.kind; if (killer == null && kb.kind != DamageKind.Gun) k = kb.weapon; }   // 致命一击的真实来源
             item.text = k + " ▶ " + victim.Hero.name;
             if (ToonAssets.Available) item.foodLine = V24.KillLine(item);
+            V25.OnKill(item, victim, killer, head);   // V25：击杀表 / 回合战报 / NEON_KILL 日志
             feed.Add(item);
             if (feed.Count > 7) feed.RemoveAt(0);
             if (Mode == GameMode.Range) { Range.OnKilled(victim); return; }
@@ -725,6 +726,7 @@ namespace NeonSiege
             if (Config.SwapEveryRound) Feed("下回合攻守互换", new Color(1f, .85f, .3f));
             Sfx.Ui(player != null && winner == player.team ? "confirmation" : "error", .6f, .8f);
             V24.Celebrate(winner);   // V24：胜利方举起餐具干杯 + 撒彩糖，MVP 戴主厨帽
+            V25.OnRoundEnd(winner, reason);   // V25：回合战报 + NEON_ROUNDRESULT
             if (ui != null) ui.OnRoundEnd();
         }
 
@@ -855,6 +857,7 @@ namespace NeonSiege
                 sb.AppendLine(string.Join(",", f.Hero.name, Config.TeamName(f.team), f.W.id, st.kills, st.deaths, st.damage.ToString("0"), st.armorDamage.ToString("0"), st.shots, st.hits,
                     st.shots > 0 ? (st.hits * 100f / st.shots).ToString("0.0") + "%" : "-", st.headshots, st.chestHits, st.stomachHits, st.armHits, st.legHits, st.pierced, st.skillUses, st.skillEffective, st.swallowedShots, st.exhaustCount));
             }
+            V25.AppendKillTable(sb);   // V25：击杀表（距离 / 武器 / 部位 / 实际击杀时间）
             string dir = System.IO.Path.Combine(Application.isEditor ? System.IO.Path.GetDirectoryName(Application.dataPath) : Application.persistentDataPath, "Playtest");
             try
             {

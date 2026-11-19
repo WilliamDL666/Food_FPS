@@ -69,7 +69,7 @@ namespace NeonSiege
                     Vector3 c = valve.CloudCenter, foeP = new Vector3(14.3f, 0, 8);
                     Place(D, foeP + Vector3.up * .05f, 0); D.hp = 100; D.armor = 50; yield return new WaitForFixedUpdate(); yield return null;
                     float R = Config.SteamAreaMid;   // V24：半径 9 → 13 m，几何取点都改成相对半径
-                    bool sOut = Spot(foeP, R + 2f, g => Flat(g, c) > R + .6f, out Vector3 outP);
+                    bool sOut = false; Vector3 outP = foeP; for (float rr2 = R + 1f; rr2 <= R + 6f && !sOut; rr2 += 1f) sOut = Spot(foeP, rr2, g => Flat(g, c) > R + .6f, out outP);   // V24 收尾：13 m 外一圈经常被墙挡，往外多试几圈
                     bool sNear = Spot(foeP, 2f, g => Flat(g, c) < R - 1f, out Vector3 nearP);
                     bool sFar = Spot(foeP, 3.6f, g => Flat(g, c) < R - 1f, out Vector3 farP);
                     where = sOut + "/" + sNear + "/" + sFar;
@@ -156,7 +156,7 @@ namespace NeonSiege
                     candyNo = pot != null && CandySteam.Spawn(pot, pot.SteamCenter, Time.time + 5f, A) == null && SteamArea.BlindCount == 2;
                     var dust = SteamArea.Spawn(SteamKind.Dust, null, new Vector3(-40, 1.2f, 4), Config.CakeDustRadius, Config.CakeDustLife, A);
                     dustOk = dust != null && SteamArea.BlindCount == 2;
-                    int white = 0; foreach (var z in LinkPlus.MapAreas()) if (z.col.r > .9f && z.col.g > .9f && z.col.b > .9f) white++;
+                    int white = 0; foreach (var z in LinkPlus.MapAreas()) if (z.col == LinkPlus.MapSteamColor) white++;   // V25：小地图蒸汽从纯白改成蓝灰，按同一个颜色常量数
                     mapBoth = white >= 2;   // MapUI.DynamicAreas 不按队伍过滤 → 双方小地图 / 大地图都画
                     maxSeen = LinkPlus.BlindMaxEver;
                     Reset(); yield return null;
@@ -164,7 +164,7 @@ namespace NeonSiege
                 }
                 Check("M88", "盲区上限（硬约束）：全图同时最多 " + Config.SteamAreaMax + " 片整片蒸汽（含棉花糖蒸汽）；满了第 3 个阀门拧不开、迷雾罩火锅也不会再开一片；开墙粉尘不算；雾区画在双方地图上（带剩余时间环）；回合重置清空",
                     two && third && candyNo && dustOk && mapBoth && after && maxSeen <= Config.SteamAreaMax,
-                    "两片=" + two + "，第 3 个拧不开=" + third + "，棉花糖不另开=" + candyNo + "，粉尘不占名额=" + dustOk + "，地图白色雾区 ≥ 2=" + mapBoth + "，清空后能再拧=" + after + "，本次运行盲区最多 " + maxSeen + " 片");
+                    "两片=" + two + "，第 3 个拧不开=" + third + "，棉花糖不另开=" + candyNo + "，粉尘不占名额=" + dustOk + "，地图蒸汽雾区 ≥ 2=" + mapBoth + "，清空后能再拧=" + after + "，本次运行盲区最多 " + maxSeen + " 片");
             }
 
             // ---------------- M89：芥末呛雾（12 m / 9 s；1.75 s 扩散；雾里敌人透视 + 减速；芥末味穿透蒸汽；自己人不受影响）
@@ -269,8 +269,8 @@ namespace NeonSiege
                     foreach (var fz in Object.FindObjectsOfType<FireZone>()) Object.Destroy(fz.gameObject);
                     Reset(); wA.ResetRound(); yield return new WaitForSeconds(.3f);
                 }
-                Check("M91", "开墙：门洞 ≥ 3.5 × " + Config.BlastWallDoorHeight + " m，NavMesh 左右各 0.75 m 两条线都能穿过（两人并排）；炸开瞬间洞口 " + Config.CakeDustLife + " s 蛋糕粉尘挡视线（同一套整片蒸汽判定），之后散掉；铆钉补洞宽度跟洞走",
-                    hole && hw >= 3.5f && hh >= 2.6f && dust && dustGone && lanes && patchW,
+                Check("M91", "开墙：门洞 ≥ " + (Config.BlastWallDoorHalf * 2f - .4f).ToString("0.0") + " × " + Config.BlastWallDoorHeight + " m，NavMesh 左右各 0.75 m 两条线都能穿过（两人并排）；炸开瞬间洞口 " + Config.CakeDustLife + " s 蛋糕粉尘挡视线（同一套整片蒸汽判定），之后散掉；铆钉补洞宽度跟洞走",
+                    hole && hw >= Config.BlastWallDoorHalf * 2f - .4f && hh >= Config.BlastWallDoorHeight - .05f && dust && dustGone && lanes && patchW,   // V24 收尾：门洞断言跟 Config 走
                     "门洞 " + hw.ToString("0.0") + " × " + hh.ToString("0.0") + " m，粉尘挡视线=" + dust + " 散掉=" + dustGone + "，两条穿洞路线 " + l1.ToString("0.0") + " / " + l2.ToString("0.0") + " m，补洞宽 " + pw.ToString("0.00") + " m（洞 " + hw.ToString("0.00") + "）");
             }
 

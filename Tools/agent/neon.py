@@ -7,6 +7,7 @@
   python Tools/agent/neon.py test                 规则 / 技能 / 交互自动化测试
   python Tools/agent/neon.py range                靶场：7 把枪 × 胸 / 头 实测 vs 理论 TTK
   python Tools/agent/neon.py match [bomb|ffa|cook|grow]   AI 整场
+  python Tools/agent/neon.py match bomb --runs 10        V25：连跑 N 场 → Build/batch_report.md（胜率 / 比分 / 超时 / 各枪各英雄 / 击杀距离 / 买枪率）
   python Tools/agent/neon.py shots                渲染检查截图 → Build/Screenshots
   python Tools/agent/neon.py verify [--no-build]  data → build → test → range → match bomb
 
@@ -191,6 +192,61 @@ def cmd_match(mode="bomb"):
     return 0 if ok else 1
 
 
+def cmd_match_batch(mode="bomb", runs=10):
+    """V25：连跑 N 场 AI 对局，汇总成一份平衡数据（大改前后各跑一次，写进 VALIDATION.md 做对比）。"""
+    from collections import Counter, defaultdict
+    scores, rounds, kills, buys, exc_total, done = [], [], [], [], 0, 0
+    for i in range(runs):
+        print("---- 第 %d / %d 场" % (i + 1, runs))
+        code, text = play("batch_%s_%02d" % (mode, i + 1), [MATCH_FLAGS[mode]], 1800)
+        if re.search(r"NEON_(MATCH|FFA|COOK)_DONE", text): done += 1
+        exc_total += sum(1 for l in text.splitlines() if "Exception" in l)
+        m = re.search(r"NEON_MATCH_DONE .*?score=(\d+):(\d+)", text)
+        if m: scores.append((int(m.group(1)), int(m.group(2))))
+        for r in re.finditer(r"NEON_ROUNDRESULT r=(\d+) att=(\d+) winner=(-?\d+) reason=(.*)", text):
+            rounds.append({"att": int(r.group(2)), "win": int(r.group(3)), "reason": r.group(4).strip()})
+        for k in re.finditer(r"NEON_KILL (.*)", text):
+            d = dict(kv.split("=", 1) for kv in k.group(1).split() if "=" in kv); kills.append(d)
+        for b in re.finditer(r"NEON_BUY r(\d+)(.*)", text):
+            if int(b.group(1)) >= 2: buys += [("(手枪)" not in t) for t in b.group(2).split() if "=" in t]
+    n = len(rounds)
+    att_win = sum(1 for r in rounds if r["win"] == r["att"])
+    timeouts = sum(1 for r in rounds if "时间" in r["reason"])
+    lines = ["# 批量对局汇总（%s × %d 场）" % (mode, runs), "",
+             "| 指标 | 值 |", "| --- | --- |",
+             "| 跑完的场次 | %d / %d（异常 %d 条） |" % (done, runs, exc_total),
+             "| 回合数 | %d |" % n,
+             "| 攻方胜率 | %s |" % ("%.0f%%" % (att_win * 100.0 / n) if n else "-"),
+             "| 超时回合 | %s |" % ("%d（%.0f%%）" % (timeouts, timeouts * 100.0 / n) if n else "-"),
+             "| 比分分布 | %s |" % (", ".join("%d:%d" % s for s in scores) or "-"),
+             "| 第 2 回合起电脑主武器不是手枪 | %s |" % ("%.0f%%" % (sum(buys) * 100.0 / len(buys)) if buys else "-"),
+             "| 回合结束原因 | %s |" % ("；".join("%s %d" % kv for kv in Counter(r["reason"] for r in rounds).most_common()) or "-"), ""]
+    def dist(d):
+        try: return float(d.get("dist", "0"))
+        except ValueError: return 0.0
+    lines += ["## 击杀距离", "", "| < 15 m | 15–40 m | 40–60 m | > 60 m |", "| --- | --- | --- | --- |"]
+    b = [0, 0, 0, 0]
+    for k in kills: x = dist(k); b[0 if x < 15 else 1 if x < 40 else 2 if x < 60 else 3] += 1
+    lines += ["| %s |" % " | ".join("%d（%.0f%%）" % (v, v * 100.0 / max(1, len(kills))) for v in b), ""]
+    for key, title in (("weapon", "各武器"), ("killer", "各英雄（击杀者）")):
+        g = defaultdict(list)
+        for k in kills: g[k.get(key, "-")].append(k)
+        lines += ["## " + title, "", "| %s | 击杀 | 爆头率 | 平均距离 | 平均击杀用时 |" % ("武器" if key == "weapon" else "英雄"), "| --- | --- | --- | --- | --- |"]
+        for name, ks in sorted(g.items(), key=lambda kv: -len(kv[1])):
+            head = sum(1 for k in ks if k.get("head") == "1") * 100.0 / len(ks)
+            ttk = [float(k.get("ttk", "0")) for k in ks if k.get("ttk")]
+            lines.append("| %s | %d | %.0f%% | %.1f m | %.2f s |" % (name, len(ks), head, sum(dist(k) for k in ks) / len(ks), sum(ttk) / max(1, len(ttk))))
+        lines.append("")
+    parts = Counter(k.get("part", "-") for k in kills)
+    lines += ["## 致命一击部位", "", "；".join("%s %d" % kv for kv in parts.most_common()) or "-", ""]
+    out = os.path.join(ROOT, "Build", "batch_report.md")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out, "w", encoding="utf-8") as f: f.write("\n".join(lines))
+    print("\n".join(lines[:14]))
+    print("[batch] → %s" % os.path.relpath(out, ROOT))
+    return 0 if done == runs and exc_total == 0 else 1
+
+
 def cmd_shots():
     code, text = play("shots", ["-neonShots"], 900, graphics=True)
     ok = "NEON_SHOTS_DONE" in text
@@ -206,7 +262,12 @@ def main(argv):
     if cmd == "build": return cmd_build("--full" in rest)
     if cmd == "test": return cmd_test()
     if cmd == "range": return cmd_range()
-    if cmd == "match": return cmd_match(rest[0] if rest else "bomb")
+    if cmd == "match":
+        mode = next((a for a in rest if not a.startswith("--") and not a.isdigit()), "bomb")
+        if "--runs" in rest:
+            i = rest.index("--runs"); n = int(rest[i + 1]) if i + 1 < len(rest) and rest[i + 1].isdigit() else 10
+            return cmd_match_batch(mode, n)
+        return cmd_match(mode)
     if cmd == "shots": return cmd_shots()
     if cmd == "verify":
         steps = [("data", cmd_data)] + ([] if "--no-build" in rest else [("build", cmd_build)]) + \

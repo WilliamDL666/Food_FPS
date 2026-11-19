@@ -101,7 +101,8 @@ namespace NeonSiege
         {
             get
             {
-                if (smoke == null) smoke = Resources.Load<Material>("Materials/FxSmoke");
+                // V25：原来的 FxSmoke（Particles/Alpha Blended）会把颜色压暗（蒸汽 / 爆炸 / 曼妥思都发灰发黑）→ 全局换成不压暗的柔和粒子材质
+                if (smoke == null) smoke = UltFx.SoftMat;
                 return smoke != null ? smoke : Additive;
             }
         }
@@ -369,7 +370,7 @@ namespace NeonSiege
             if (done) return;
             // V20：子弹下坠
             if (w != null && w.dropScale > 0) { Vector3 vel = dir * speed + Vector3.down * 9.81f * w.dropScale * Time.deltaTime; speed = vel.magnitude; dir = vel / speed; }
-            float step = speed * Time.deltaTime;
+            float step = speed * Time.deltaTime * V25.BulletSlow(this);   // V25：敌方果冻罩里的子弹变慢（看得见轨迹）
             Vector3 pos = transform.position;
             var hits = Physics.RaycastAll(pos, dir, step, ~0, QueryTriggerInteraction.Ignore);
             System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));

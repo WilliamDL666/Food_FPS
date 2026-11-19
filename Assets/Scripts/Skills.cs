@@ -628,6 +628,7 @@ namespace NeonSiege
         {
             owner = f; born = Time.time;
             col = gameObject.AddComponent<BoxCollider>(); col.size = new Vector3(w, h, thick); col.center = new Vector3(0, h / 2, 0);
+            V25.CoverPushOut(transform, w, h, thick);   // V25：威化墙放下时把站在里面的人轻轻推开（防止卡进墙里）
             visual = GameObject.CreatePrimitive(PrimitiveType.Cube).transform;
             Destroy(visual.GetComponent<Collider>());
             visual.SetParent(transform, false); visual.localScale = new Vector3(w, .05f, thick);
@@ -765,7 +766,7 @@ namespace NeonSiege
         public static readonly List<ShieldWall> Docked = new List<ShieldWall>();
         public float Hp { get { return hp; } }
         public float HpMax { get { return hpMax; } }
-        public float Width { get { return w; } }
+        public float Width { get { return w; } } public float Height { get { return hgt; } }   // V25：门帘珍珠 / 布丁凹陷
         void OnDisable() { Docked.Remove(this); }
         public void InitDock(Fighter f, Links.Frame fr)
         {
@@ -845,7 +846,8 @@ namespace NeonSiege
             {
                 jt += Time.deltaTime; float jw = Mathf.Exp(-jt * 6f) * Mathf.Sin(jt * 28f);
                 float pop = PopCurve(age);   // V23：0.3 s 的弹性出场（盾第 1 帧就生效，只是形状在弹）
-                jiggle.localScale = new Vector3(jiggleBase.x * (1 + .03f * jw) * (2f - pop) * .5f + jiggleBase.x * .5f, jiggleBase.y * (1 - .05f * jw) * pop, jiggleBase.z);
+                float flat = docked ? 1f : .78f + .22f * Mathf.Clamp01(hp / hpMax);   // V25：布丁盾越伤越扁；被打那一下像果冻一样凹进去再弹回
+                jiggle.localScale = new Vector3(jiggleBase.x * (1 + .03f * jw) * (2f - pop) * .5f + jiggleBase.x * .5f, jiggleBase.y * (1 - .05f * jw) * pop * flat, jiggleBase.z * (1f - (docked ? 0f : .45f) * Mathf.Abs(jw)));
                 jiggle.localPosition = new Vector3(0, jiggle.localScale.y / 2f, 0);
                 if (hp < hpMax * .5f && Time.time >= dripAt) { dripAt = Time.time + Mathf.Lerp(.15f, .5f, hp / (hpMax * .5f)); Fx.Burst(transform.position + transform.right * Random.Range(-w * .45f, w * .45f) + Vector3.up * .15f, Vector3.down, new Color(.75f, .45f, .12f), 2, .5f, .07f, .6f, 1.5f); }   // 血量 < 50%：底部滴焦糖
             }
@@ -857,6 +859,7 @@ namespace NeonSiege
         {
             if (source != null && source.team == owner.team) return true;   // blocks friendly fire too, without damage
             hp -= amount; absorbed += amount;
+            if (docked && Skills.Food && source != null) V25.CurtainPearl(this, source);   // V25：子弹陷进果冻门帘，变成悬浮的珍珠 / 爆米花
             mat.SetColor("_Color", Color.white * 3f);
             if (source != null) { mat.SetVector("_HitPos", transform.position + Vector3.up * 1.4f + (source.transform.position - transform.position).normalized * .1f); mat.SetFloat("_HitTime", Time.timeSinceLevelLoad); }
             if (Skills.Food)

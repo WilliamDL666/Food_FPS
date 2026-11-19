@@ -554,6 +554,7 @@ namespace NeonSiege
     public class SecurityCam : MonoBehaviour, IDamageable
     {
         public float yawCenter; bool broken;
+        public Transform Head { get { return head; } }   // V25：看监控画面 / 扇形
         public bool Working { get { return !broken; } } Transform head; Light lamp; LineRenderer cone;
         public void Build()
         {
@@ -572,6 +573,7 @@ namespace NeonSiege
         public bool TakeDamage(float amount, Fighter source, bool explosive)
         {
             if (broken) return false;
+            if (V25.HijackedBy(this) >= 0 && source != null && source.team != V25.HijackedBy(this)) { V25.EndHijack(this, source); return true; }   // V25：守方打掉接管监控的糖丝（监控本身不坏）
             if (source != null && Match.I != null && source.team == Match.I.DefendingTeam) return false;
             broken = true; head.gameObject.SetActive(false);
             Fx.Burst(head.position, Vector3.down, new Color(1f, .8f, .4f), 25, 4, .05f, .6f, 1);
@@ -582,6 +584,7 @@ namespace NeonSiege
         void Update()
         {
             if (broken || Match.I == null) return;
+            if (V25.HijackedBy(this) >= 0) { lamp.intensity = Mathf.Repeat(Time.time, .5f) < .25f ? 2f : .4f; lamp.color = new Color(1f, .5f, .9f); V25.HijackScan(this, head); return; }   // V25：被幻频接管 → 反过来扫守方
             if (LinkPlus.Gummed(this)) { lamp.intensity = .25f; lamp.color = new Color(1f, .6f, .9f); return; }   // V23 d：被棉花糖糊住 → 迷雾期间失效
             lamp.color = new Color(1f, .1f, .1f);
             float yaw = yawCenter + Mathf.Sin(Time.time * .5f) * 40f;
@@ -596,7 +599,7 @@ namespace NeonSiege
                 Vector3 to = f.Chest - eye;
                 if (to.magnitude > 28f || Vector3.Angle(head.forward, to) > 35f) continue;
                 if (Time.time < f.hiddenFromScanUntil) continue;
-                if (Skills.SightClear(eye, f.Chest, f)) f.revealedUntil = Mathf.Max(f.revealedUntil, Time.time + .6f);
+                if (Skills.SightClear(eye, f.Chest, f)) { f.revealedUntil = Mathf.Max(f.revealedUntil, Time.time + .6f); V25.CamSpotted(f, this); }   // V25：被扫到的人看得到红眼睛 + 哔声；守方小地图红点
             }
         }
     }
