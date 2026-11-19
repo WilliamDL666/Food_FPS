@@ -245,7 +245,22 @@ namespace NeonSiege
             lamp.color = new Color(1f, .5f, .2f); lamp.range = 3f; lamp.intensity = 1f;
         }
     }
-    public class FaceCam : MonoBehaviour { void LateUpdate() { var c = Camera.main; if (c != null) transform.rotation = Quaternion.LookRotation(transform.position - c.transform.position); } }
+    // V26：走近时字不再变巨大 —— 8 m 内按距离缩小（屏幕上大小不变），2.5 m 内淡出
+    public class FaceCam : MonoBehaviour
+    {
+        public const float FullDist = 8f, HideDist = 2.5f;
+        Vector3 baseScale; Renderer rend; bool init;
+        void LateUpdate()
+        {
+            var c = Camera.main; if (c == null) return;
+            if (!init) { init = true; baseScale = transform.localScale; rend = GetComponent<Renderer>(); }
+            transform.rotation = Quaternion.LookRotation(transform.position - c.transform.position);
+            float d = Vector3.Distance(transform.position, c.transform.position);
+            transform.localScale = baseScale * Scale(d);
+            if (rend != null) rend.enabled = d > HideDist;
+        }
+        public static float Scale(float d) { return Mathf.Clamp(d / FullDist, .3f, 1f); }
+    }
 
     // ---------------------------------------------------------------- 威化坡道（铆钉副联动）
     public class WaferRamp : MonoBehaviour, IDamageable
@@ -551,7 +566,7 @@ namespace NeonSiege
         // 扫全图找"约 2.2–2.6 m 高、上面能站人、旁边地面能放下 30° 坡"的平台边（最多 5 个，互相隔 12 m，离包点近的优先）
         static void FindRamps()
         {
-            var cands = new List<RampSpot>();
+            var cands = new List<RampSpot>(); rejected.Clear();
             float tan = Mathf.Tan(Config.WaferRampAngle * Mathf.Deg2Rad);
             Vector3[] dirs = { Vector3.right, Vector3.left, Vector3.forward, Vector3.back };
             for (float x = -Arena.HalfX + 2; x <= Arena.HalfX - 2; x += .75f)
@@ -593,6 +608,7 @@ namespace NeonSiege
                             foreach (float sd in new[] { -.9f, 0f, .9f }) if (Physics.CheckSphere(sp + side * sd, .5f, ~0, QueryTriggerInteraction.Ignore)) { free = false; break; }
                         }
                         if (!free) continue;
+                        if (!V26.RampOk(top, d, h, out string why)) { rejected[why] = rejected.TryGetValue(why, out int rc) ? rc + 1 : 1; continue; }   // V26：复核"不该上的高点"
                         cands.Add(new RampSpot { top = top, basePos = b, dir = d, h = h });
                     }
                 }
@@ -605,7 +621,13 @@ namespace NeonSiege
                 Ramps.Add(c);
                 if (Ramps.Count >= 5) break;
             }
+            var sb = new System.Text.StringBuilder("NEON_V26RAMP spots=" + Ramps.Count + " rejected=");
+            foreach (var kv in rejected) sb.Append(kv.Key + "×" + kv.Value + "；");
+            foreach (var r in Ramps) sb.Append(" | " + V26.RampZone(r.top) + " h=" + r.h.ToString("0.00") + " top=" + r.top.ToString("0.0") + " dir=" + r.dir);
+            Debug.Log(sb.ToString());
         }
+        public static readonly Dictionary<string, int> RampRejected = new Dictionary<string, int>();
+        static Dictionary<string, int> rejected { get { return RampRejected; } }
         static float SiteDist(Vector3 p) { return Mathf.Min(Links.Flat(p, Arena.SiteA), Links.Flat(p, Arena.SiteB)); }
 
         // ---------------------------------------------------------------- 威化坡道

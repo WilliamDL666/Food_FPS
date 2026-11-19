@@ -538,6 +538,7 @@ namespace NeonSiege
                 yield return LinkTests.Run(Check);                   // V23 d：联动放大 + 副联动 + 硬约束（M85 起，LinkTests.cs）
                 yield return V24Tests.Run(Check);                    // V24：体验强化（M101 起，V24Tests.cs）
                 yield return V25Tests.Run(Check);                    // V25：奶茶机 / 变身 / 监控 / 干员加料 / 数据（M115 起，V25Tests.cs）
+                yield return V26Tests.Run(Check);                    // V26：上版遗留 + 说好没做完的（M121 起，V26Tests.cs）
                 if (ToonAssets.Available) yield return V23PolishTests();   // V23 打磨：大招远景 / 可乐喷泉 / 食材光柱 / 左手道具 / 大地图（M77）
                 m.roundClock = Config.RoundTime; m.phase = Phase.Live;   // V17 的新测试较长，重置回合时钟，免得后面的测试撞上超时
             }
@@ -1294,6 +1295,7 @@ namespace NeonSiege
             if (p != null) yield return MapUiTests.Shots(dir, Grab);   // V23 b：小地图跟随 / 北向、大地图、食材光柱 / 边缘箭头 / 交火变淡（80–86，MapUiTests.cs）
             if (p != null) yield return LinkTests.Shots(dir, Grab);    // V23 d：整片蒸汽内外 / 芥末呛雾 / 开大火 / 副联动 / 门洞（90–98，LinkTests.cs）
             if (p != null) yield return V25Tests.Shots(dir, Grab);     // V25：变身外壳 / 监控扇形 / 看监控 / 回合战报 / 蛋糕影子（120–126，V25Tests.cs）
+            if (p != null) yield return V26Tests.Shots(dir, Grab);     // V26：枪皮肤 / 准星提示 / 糖果眼睛 / 传菜走廊 / 蒸笼门 / 烤串巷 / 爆米花近景 / 坡道（130–144，V26Tests.cs）
             // V9 menus
             m.ui.preview = 1; for (int f = 0; f < 3; f++) yield return null;
             yield return Grab(System.IO.Path.Combine(dir, "17_main_menu.png"));

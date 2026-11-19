@@ -106,6 +106,7 @@ namespace NeonSiege
             FoodScenery.Dress(arena);      // V21：场景道具（建在 Arena 层级外、烘焙匹配之后，不影响光照贴图按顺序匹配）
             LinkPlus.Dress(arena);         // V23 d：开大火旋钮 / 威化坡道点 / 酱料点（同样建在 Arena 层级外）
             V24.Dress(arena);              // V24：冰淇淋冰柜 / 爆米花机 / 巨型甜甜圈（同样建在 Arena 层级外）
+            V26.DressMap(arena);           // V26：蒸笼门 / 北烤串巷细节（建在 Arena 层级外）
             GameSettings.Apply();
             Time.timeScale = 1;
             gameObject.AddComponent<Ambience>();

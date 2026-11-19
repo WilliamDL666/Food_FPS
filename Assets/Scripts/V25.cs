@@ -23,7 +23,7 @@ namespace NeonSiege
         // ---------------------------------------------------------------- 布置
         public static void Dress(Arena arena)
         {
-            V25Hud.Ensure();
+            V25Hud.Ensure(); V26Hud.Ensure();
             if (arena == null) return;
             // 恢复 2 个回血炉（V22 地图重构时注释掉了；现在按"贴墙 + 不压别的交互物"重新找位置）
             int heal = 0;
@@ -80,6 +80,7 @@ namespace NeonSiege
                 V25Hud.FormPop(Ingredients.FormName(fm) + "！" + Ingredients.FormEffect(fm), Ingredients.FormColor(fm));
                 f.ViewNudge(2f, 6f, .25f);   // 镜头一缩一弹
                 FpGarnish.Attach(f, fm);
+                V26.OnBecome(f, fm);   // V26：第一人称枪换皮肤
             }
         }
         public static void OnFormEnd(Fighter f, FoodForm fm, bool announce)
@@ -87,6 +88,7 @@ namespace NeonSiege
             if (f == null || fm == FoodForm.None) return;
             var shell = f.GetComponent<FormShell>(); if (shell != null) { shell.Break(announce); FormBreaks++; }
             var g = f.GetComponent<FpGarnish>(); if (g != null) Object.Destroy(g);
+            V26.OnFormEnd(f);
             if (f.human && announce && f.alive) V25Hud.FormPop("变身结束", new Color(.85f, .88f, .95f));
         }
 
@@ -192,6 +194,20 @@ namespace NeonSiege
         public static readonly List<KillRow> Kills = new List<KillRow>();
         static int lastRound = -1;
         public static string PartName(HitPart p) { switch (p) { case HitPart.Head: return "头"; case HitPart.Chest: return "胸"; case HitPart.Stomach: return "腹"; case HitPart.Arm: return "手臂"; default: return "腿"; } }
+        // V26：没有命中部位的击杀（爆炸 / 火 / 近战 / 技能 / 环境）按伤害类型写名字
+        public static string KindPart(DamageKind k, string cause)
+        {
+            switch (k)
+            {
+                case DamageKind.Bomb: case DamageKind.Grenade: return "爆炸";
+                case DamageKind.Fire: return "烫伤";
+                case DamageKind.Melee: return "近战";
+                case DamageKind.Skill: case DamageKind.Ult: return "技能";
+                case DamageKind.Food: return "食物";
+                case DamageKind.Env: return "环境";
+                default: return !string.IsNullOrEmpty(cause) && cause.Contains("爆") ? "爆炸" : "身体";
+            }
+        }
         public static void OnKill(FeedItem it, Fighter victim, Fighter killer, bool head)
         {
             var m = Match.I; if (m == null || victim == null) return;
@@ -199,12 +215,12 @@ namespace NeonSiege
             lastRound = m.round;
             var row = new KillRow { round = m.round, killer = killer != null ? killer.Hero.name : "环境", victim = victim.Hero.name, head = head, killerTeam = killer != null ? killer.team : -1, victimTeam = victim.team };
             row.weapon = it != null && it.gun != null ? it.gun.id : it != null && !string.IsNullOrEmpty(it.cause) ? it.cause : "-";
-            row.part = "-"; row.dist = killer != null ? Vector3.Distance(killer.transform.position, victim.transform.position) : 0;
+            row.part = KindPart(it != null ? it.kind : DamageKind.Env, row.weapon); row.dist = killer != null ? Vector3.Distance(killer.transform.position, victim.transform.position) : 0;
             var log = victim.damageLog;
             if (log.Count > 0)
             {
                 var last = log[log.Count - 1];
-                if (last.hasPart) row.part = PartName(last.part);
+                row.part = last.hasPart ? PartName(last.part) : KindPart(last.kind, last.weapon);   // V26：非子弹伤害也写清楚，不留 "-"
                 if (last.distance > .1f) row.dist = last.distance;
                 float first = last.time;
                 for (int i = log.Count - 1; i >= 0; i--)
@@ -397,8 +413,13 @@ namespace NeonSiege
             for (int i = 0; i < vs.Length; i++) edge.SetPosition(i, vs[i] + Vector3.up * .02f);
             edge.startWidth = edge.endWidth = .14f; edgeMat = new Material(Shader.Find("Sprites/Default")) { renderQueue = 3002 }; edge.sharedMaterial = edgeMat;
             edge.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; edge.receiveShadows = false;   // 默认朝向镜头，任何角度都看得见
+            // V26：扫描线 —— 一条亮线在扇形里来回扫（雷达那样），远处也看得出"这里有监控在看"
+            var sg = new GameObject("扫描线"); sg.transform.SetParent(fan, false);
+            sweep = sg.AddComponent<LineRenderer>(); sweep.useWorldSpace = false; sweep.positionCount = 2; sweep.startWidth = .22f; sweep.endWidth = .1f;
+            sweep.sharedMaterial = edgeMat; sweep.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off; sweep.receiveShadows = false;
         }
-        LineRenderer edge; Material edgeMat;
+        LineRenderer edge, sweep; Material edgeMat;
+        public float SweepAngle { get; private set; }
         void OnDestroy() { if (fan != null) Destroy(fan.gameObject); if (mat != null) Destroy(mat); if (edgeMat != null) Destroy(edgeMat); }
         void LateUpdate()
         {
@@ -409,8 +430,13 @@ namespace NeonSiege
             if (Physics.Raycast(p, Vector3.down, out RaycastHit g, 12f, ~0, QueryTriggerInteraction.Ignore)) p = g.point + Vector3.up * .04f; else p.y = .04f;
             fan.position = p; fan.rotation = Quaternion.Euler(0, cam.transform.eulerAngles.y, 0);
             float k = .5f + .5f * Mathf.Sin(Time.time * 3f);
-            mat.color = hij ? new Color(.7f, .1f, .9f, .32f + .1f * k) : new Color(1f, .08f, .05f, .3f + .1f * k);   // 截图验证：粉色 .28 画在粉紫地面上看不出 → 守方红更深、被接管改深紫红
+            mat.color = hij ? new Color(.7f, .1f, .9f, .42f + .1f * k) : new Color(1f, .08f, .05f, .4f + .1f * k);   // V26：填充 .3 → .4（还是偏淡）   // 截图验证：粉色 .28 画在粉紫地面上看不出 → 守方红更深、被接管改深紫红
             if (edgeMat != null) edgeMat.color = hij ? new Color(.75f, .15f, 1f, .75f + .2f * k) : new Color(1f, .12f, .08f, .75f + .2f * k);
+            if (sweep != null)
+            {
+                SweepAngle = Mathf.Sin(Time.time * 1.6f) * Half * .95f; float a = SweepAngle * Mathf.Deg2Rad;
+                sweep.SetPosition(0, Vector3.up * .03f); sweep.SetPosition(1, new Vector3(Mathf.Sin(a) * Range, .03f, Mathf.Cos(a) * Range));
+            }
         }
     }
 

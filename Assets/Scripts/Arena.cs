@@ -151,6 +151,7 @@ namespace NeonSiege
             Alleys();
             KebabAlley();      // V22 第二期：北烤串巷（外卖阳台）
             SouthKitchen();    // V22 第二期：南后厨（室内厨房）
+            KitchenWalkway();  // V26：南后厨二楼传菜走廊（MAP-A4）
             CyberDressing();
             ZoneMarkings();
             TacticalLayout();
@@ -1090,9 +1091,9 @@ namespace NeonSiege
             // 和烤串巷同样的西-东-西三段高柜台（2.1 m），后厨里走 S 形
             AlleyCounter("出餐台", x0, -1.8f, -13.4f, -12.4f, new Color(.8f, .82f, .86f), "Dumpling");
             AlleyCounter("冷藏柜", -3.2f, x1, -17f, -16f, new Color(.6f, .88f, .76f), "IceCream");
-            AlleyCounter("蒸笼架", x0, -1.8f, -28f, -27f, new Color(.9f, .72f, .45f), "Dumpling");
+            AlleyCounter("蒸笼架", x0, -2.4f, -28f, -27f, new Color(.9f, .72f, .45f), "Dumpling");   // V26：-1.8 → -2.4，给传菜走廊楼梯让出 2 m 通道
             Box("备餐台", new Vector3(-1.6f, .5f, -23f), new Vector3(1f, 1f, 2.4f), steel);
-            Box("调料架", new Vector3(x1 - .3f, 1.1f, -25.8f), new Vector3(.6f, 2.2f, 3f), wall);
+            Box("调料架", new Vector3(x0 + .3f, 1.1f, -24.5f), new Vector3(.6f, 2.2f, 3f), wall);   // V26：东墙 → 西墙（东墙下面是楼梯）
             Box("抽油烟机", new Vector3(x0 + .6f, 3.3f, -19.5f), new Vector3(1.2f, .6f, 2.4f), steel, false, 0, false);
             Box("墙面瓷砖带", new Vector3(x0 + .03f, 1.6f, -20), new Vector3(.06f, .3f, 19.4f), mint, false, 0, false);
             Box("墙面瓷砖带", new Vector3(x1 - .03f, 1.6f, -20), new Vector3(.06f, .3f, 19.4f), mint, false, 0, false);
@@ -1103,7 +1104,47 @@ namespace NeonSiege
                 Glowbox("后厨灯管", new Vector3(cx, H - .04f, z), new Vector3(2.4f, .05f, .3f), Glow(new Color(1f, .95f, .85f), 1.2f));
             }
             Steam(new Vector3(x0 + .6f, 1.3f, -19.5f));
-            Sign("南后厨", new Vector3(x1 - .07f, 3.4f, -19f), -90, new Color(1f, .6f, .5f), .8f);
+            Sign("南后厨", new Vector3(x0 + .07f, 4.6f, -14.5f), 90, new Color(1f, .6f, .5f), .8f);   // V26：东墙 3.4 m 处被走廊挡住 → 挪到西墙高处
+        }
+
+        // V26：南后厨二楼传菜走廊（MAP-A4 "a raised pass-through serving walkway 3.5 m high on one side"）
+        // 东墙一条 2 m 宽、3.5 m 高的走廊（z -22.6 → -11.2），南端楼梯下来，北端出口跳下到北门。西侧 1 m 栏杆：站着能往下打，蹲下全挡。
+        // 新建的东西全部挪到 Arena 层级外（"V26 地图"），烘焙光照按渲染器顺序匹配，不能多出渲染器；寻路网格在这之后才烘，所以走廊能走。
+        public const float WalkX0 = -1f, WalkX1 = 1f, WalkZ0 = -22.6f, WalkZ1 = -11.2f;
+        public static Transform V26Root;
+        void KitchenWalkway()
+        {
+            int before = transform.childCount;
+            const float T = CreamTop; float cz = (WalkZ0 + WalkZ1) / 2, len = WalkZ1 - WalkZ0, cx = (WalkX0 + WalkX1) / 2;
+            var steel = Candy("walkSteel", new Color(.82f, .85f, .9f), .7f);
+            var mint = Candy("kitchenMint", new Color(.6f, .88f, .76f), .35f);
+            var grate = Pattern("walkGrate", new Color(.78f, .82f, .88f), new Color(.62f, .66f, .74f), true);
+            var deck = Box("传菜走廊", new Vector3(cx, T - .15f, cz), new Vector3(WalkX1 - WalkX0, .3f, len), steel, false); Tile(deck, 2, 8);
+            Box("传菜走廊格栅", new Vector3(cx, T + .005f, cz), new Vector3(WalkX1 - WalkX0 - .1f, .01f, len - .1f), grate, false, 0, false);
+            Box("传菜走廊栏杆", new Vector3(WalkX0 + .06f, T + .5f, cz - 1.1f), new Vector3(.12f, 1f, len - 2.2f), mint, false);   // 北端 2.2 m 不设栏杆 = 跳下口
+            Box("传菜走廊扶手", new Vector3(WalkX0 + .06f, T + 1.03f, cz - 1.1f), new Vector3(.2f, .06f, len - 2.2f), steel, false, 0, false);
+            foreach (float z in new[] { -13.2f, -19.6f, -22.3f }) Box("传菜走廊支柱", new Vector3(WalkX0 + .2f, (T - .3f) / 2f, z), new Vector3(.25f, T - .3f, .25f), steel, false);
+            Ramp("传菜走廊楼梯", new Vector3(.3f, T, WalkZ0), Vector3.back, T, 4.6f, 1.4f, steel, mint);
+            // 传菜：栏杆上一排小蒸笼 / 盘子（只是外观）
+            for (int i = 0; i < 5; i++) Food(i % 2 == 0 ? "Dumpling" : "Sushi", new Vector3(WalkX0 + .06f, T + 1.12f, WalkZ0 + 2f + i * 1.9f), 90, .28f);
+            // 走廊下挂一排锅（MAP-A4 hanging pots）
+            var pot = Candy("hangPot", new Color(1f, .55f, .45f), .6f);
+            for (int i = 0; i < 4; i++)
+            {
+                float z = WalkZ0 + 1.6f + i * 2.8f;
+                Box("挂锅绳", new Vector3(WalkX0 - .25f, T - .55f, z), new Vector3(.03f, .5f, .03f), steel, false, 0, false);
+                var g = GameObject.CreatePrimitive(PrimitiveType.Cylinder); Kill(g.GetComponent<Collider>()); g.name = "挂锅"; g.transform.SetParent(transform, true);
+                g.transform.position = new Vector3(WalkX0 - .25f, T - .95f, z); g.transform.localScale = new Vector3(.55f, .14f, .55f); g.GetComponent<Renderer>().sharedMaterial = pot;
+            }
+            Glowbox("传菜走廊灯条", new Vector3(WalkX0 + .02f, T - .32f, cz), new Vector3(.04f, .06f, len), Glow(new Color(1f, .75f, .6f), 2f));
+            Lamp(new Vector3(cx, T + 2.1f, cz), new Color(1f, .88f, .76f), 1.4f, 7f);
+            Sign("传菜走廊", new Vector3(WalkX1 - .07f, T + 1.6f, cz), -90, new Color(1f, .6f, .5f), .55f);
+            spots.Add(new Spot { label = "中层 · 后厨传菜走廊（楼梯）", pos = new Vector3(cx, T, cz), kind = 0 });
+            afterNav.Add(() => JumpLink(new Vector3(cx, T, WalkZ1 - .3f), new Vector3(cx, 0, WalkZ1 + .8f)));
+            // 挪出 Arena 层级（不影响光照贴图匹配；碰撞体还在，寻路网格照样烘进去）
+            if (V26Root == null) V26Root = new GameObject("V26 地图").transform;
+            var moved = new List<Transform>(); for (int i = before; i < transform.childCount; i++) moved.Add(transform.GetChild(i));
+            foreach (var t in moved) t.SetParent(V26Root, true);
         }
 
         // 连接巷 / 后厨里的高柜台：实心 2.1 m（站姿挡胸口、蹲下全挡），顶上摆一样美食
@@ -2157,7 +2198,7 @@ namespace NeonSiege
         }
 
         NavMeshDataInstance navInstance;
-        void OnDestroy() { if (navInstance.valid) navInstance.Remove(); }
+        void OnDestroy() { if (navInstance.valid) navInstance.Remove(); if (V26Root != null && Application.isPlaying) Destroy(V26Root.gameObject); }
 
         void DefineRoutes()
         {

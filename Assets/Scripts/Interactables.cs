@@ -68,7 +68,8 @@ namespace NeonSiege
         public string Kind { get { return gate ? "蒸笼门" : "卷帘门"; } }
         public float Width { get { return width; } }
         public float Height { get { return height; } }
-        public bool Moving { get { return t < 1f; } }   // V22 第三期：门框联动只在完全开着时生效
+        public bool Moving { get { return t < 1f; } }
+        public Transform Slab { get { return slab; } }   // V26：蒸笼门装饰跟着门扇动   // V22 第三期：门框联动只在完全开着时生效
         // 爆破模式只有守方能盖上蒸笼门；其他模式谁都能关
         public static bool CanClose(Fighter f) { return Match.I == null || Match.Mode != GameMode.Bomb || f == null || f.team == Match.I.DefendingTeam; }
         public void BuildGate(float w, float h, Material frame)
@@ -568,6 +569,7 @@ namespace NeonSiege
             var col = head.gameObject.AddComponent<BoxCollider>(); col.size = new Vector3(.3f, .35f, .6f);
             lamp = new GameObject("录像灯").AddComponent<Light>(); lamp.transform.SetParent(head, false); lamp.transform.localPosition = new Vector3(0, 0, .4f);
             lamp.color = new Color(1f, .1f, .1f); lamp.range = 2; lamp.intensity = 2;
+            V26.CandyEye(this, head);   // V26：美食模式下做成糖果眼睛
         }
         public void ResetRound() { broken = false; head.gameObject.SetActive(true); }
         public bool TakeDamage(float amount, Fighter source, bool explosive)
@@ -575,7 +577,7 @@ namespace NeonSiege
             if (broken) return false;
             if (V25.HijackedBy(this) >= 0 && source != null && source.team != V25.HijackedBy(this)) { V25.EndHijack(this, source); return true; }   // V25：守方打掉接管监控的糖丝（监控本身不坏）
             if (source != null && Match.I != null && source.team == Match.I.DefendingTeam) return false;
-            broken = true; head.gameObject.SetActive(false);
+            broken = true; head.gameObject.SetActive(false); V26.CandyBreak(head.position);   // V26：糖壳碎裂
             Fx.Burst(head.position, Vector3.down, new Color(1f, .8f, .4f), 25, 4, .05f, .6f, 1);
             Sfx.Play("impactMetal", head.position, 1f, 1.4f);
             if (Match.I != null) Match.I.Feed("守方监控被摧毁");
